@@ -462,7 +462,7 @@ def build_merged_clause_set(all_clauses: dict) -> dict:
         merged[ref] = merge_clause_to_completion(ref, all_clauses)
     return merged
 
-def build_context_bundle(clause_ref: dict, all_clauses: dict) -> dict:
+def build_context_bundle(clause_ref: str, all_clauses: dict) -> dict:
     """
     Builds a full ancestor chain from the target clause up to the root.
     all_clauses is a dict keyed by clause_ref for fast lookup.
@@ -917,7 +917,7 @@ RULE NAME     : {rule_name}
 PARENT REF    : {parent_ref}
 CLAUSE REF    : {clause_ref}
 TARGET CLAUSE : {target_clause}
-FULL RULE TEXT: {full_rule_text}"""
+FULL RULE TEXT: {context_text}"""
 
 
 # ── Bundle Formatter ──────────────────────────────────────────────────────────
@@ -997,8 +997,8 @@ def build_normalisation_prompt(
     parent_ref = target.get("parent_clause") or "null"
 
     # Merging the current clause with all its ancestors to build a full clause
-    full_rule_text = merge_clause_to_completion(clause_ref, all_clauses)
-    full_rule_text = full_rule_text.get("raw_text", "")
+    context_text = merge_clause_to_completion(clause_ref, all_clauses)
+    context_text = context_text.get("raw_text", "")
     
     # Format the bundle into the RAW CLAUSE TEXT block
     # raw_clause_text = format_bundle_for_prompt(bundle)
@@ -1009,6 +1009,6 @@ def build_normalisation_prompt(
         parent_ref      = parent_ref,
         clause_ref      = clause_ref,
         target_clause   = target_clause,
-        full_rule_text  = full_rule_text,
+        context_text  = context_text,
         # raw_clause_text = raw_clause_text,
     )
