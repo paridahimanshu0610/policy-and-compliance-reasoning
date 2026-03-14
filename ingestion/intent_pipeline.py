@@ -627,95 +627,12 @@ def extract_structured_intent(
 
 # ── Full Pipeline ─────────────────────────────────────────────────────────────
 
-# def assess_query(model: Llama, query: str) -> tuple[bool, list[str]]:
-#     """
-#     Returns (is_self_contained, missing_fields).
-
-#     missing_fields is a list of field names that could not be
-#     determined from the query. Empty list means fully self-contained.
-#     """
-#     prompt = f"""A user submitted this compliance query:
-
-#     "{query}"
-
-#     Assess whether the query already answers each of the following.
-#     Answer each with YES or NO only — no explanation.
-
-#     1. Is the regulated activity or situation clearly identifiable
-#     (e.g. inspecting an office, borrowing from a client, outside
-#     business activity, customer complaint)?
-#     2. Is it clear who is involved — the firm, a registered
-#     representative, a principal, or another specific role?
-#     3. Is it clear whether a customer or their account is involved?
-#     4. Is it clear whether an outside firm, bank, employer, or
-#     regulator is involved?
-#     5. If the query involves capital levels, revenue figures, margin
-#     requirements, or asset values — is the specific financial
-#     metric or threshold clearly stated? If the query does not
-#     involve any financial metric, answer YES.
-
-#     Respond in exactly this format:
-#     1: YES or NO
-#     2: YES or NO
-#     3: YES or NO
-#     4: YES or NO
-#     5: YES or NO"""
-
-#     response = model.create_chat_completion(
-#         messages    = [{"role": "user", "content": prompt}],
-#         temperature = 0.0,
-#         max_tokens  = 30,
-#     )
-#     raw     = response["choices"][0]["message"]["content"].strip()
-#     answers = re.findall(r"\d+:\s*(YES|NO)", raw.upper())
-
-#     if len(answers) < 4:
-#         # Cannot parse — assume all missing
-#         return False, ["activity", "actor", "involves_customer",
-#                        "involves_third_party"]
-
-#     field_names = [
-#         "activity",
-#         "actor",
-#         "involves_customer",
-#         "involves_third_party",
-#         "has_financial_threshold",
-#     ]
-
-#     missing = [
-#         field_names[i]
-#         for i, answer in enumerate(answers)
-#         if answer == "NO"
-#     ]
-
-#     return len(missing) == 0, missing
-
-
-# def run_intent_pipeline(model: Llama, first_query: str) -> dict | None:
-
-#     is_complete, missing_fields = assess_query(model, first_query)
-
-#     if is_complete:
-#         # All four critical fields determinable — skip clarification
-#         situation_summary = first_query
-#     else:
-#         # Pass only the missing fields into the clarification agent
-#         max_q             = len(missing_fields)   # one question per gap
-#         situation_summary = run_clarification_agent(
-#             model          = model,
-#             first_query    = first_query,
-#             missing_fields = missing_fields,
-#             max_questions  = max_q,
-#         )
-
-#     return extract_structured_intent(model, situation_summary)
-
 def run_intent_pipeline(model: Llama, first_query: str) -> dict | None:
 
     situation_summary = run_clarification_agent(
         model         = model,
         first_query   = first_query,
-        max_questions = 3,
+        max_questions = 5,
     )
 
     if not situation_summary:
