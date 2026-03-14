@@ -627,19 +627,46 @@ def extract_structured_intent(
 
 # ── Full Pipeline ─────────────────────────────────────────────────────────────
 
-def run_intent_pipeline(model: Llama, first_query: str) -> dict | None:
-
+def run_intent_pipeline(
+    model:         Llama,
+    first_query:   str,
+    max_questions: int = 3,
+) -> tuple[dict, str] | None:
+    """
+    Runs the full intent pipeline: clarification agent followed by
+    structured intent extraction.
+ 
+    Parameters
+    ----------
+    model         : loaded Llama instance
+    first_query   : the user's initial compliance question
+    max_questions : maximum clarifying questions to ask  (default: 3)
+ 
+    Returns
+    -------
+    A (intent_dict, situation_summary) tuple on success, or None if
+    the pipeline could not produce a usable situation summary.
+ 
+    The situation_summary is returned alongside the intent_dict because
+    it is needed downstream for both retrieval (semantic query) and
+    compliance reasoning (the situation the LLM reasons against).
+    """
     situation_summary = run_clarification_agent(
         model         = model,
         first_query   = first_query,
-        max_questions = 5,
+        max_questions = max_questions,
     )
-
+ 
     if not situation_summary:
         print("✗ No situation summary produced.")
         return None
-
-    return extract_structured_intent(model, situation_summary)
+ 
+    intent = extract_structured_intent(model, situation_summary)
+ 
+    if intent is None:
+        return None
+ 
+    return intent, situation_summary
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
@@ -661,9 +688,12 @@ if __name__ == "__main__":
         print("No query entered.")
     else:
         result = run_intent_pipeline(model, first_query)
-
+    
         if result:
-            print("\n✓ Structured intent:")
-            print(json.dumps(result, indent=2))
+            intent, summary = result
+            print("\\n✓ Situation summary:")
+            print(summary)
+            print("\\n✓ Structured intent:")
+            print(json.dumps(intent, indent=2))
         else:
-            print("\n✗ Intent structuring failed.")
+            print("\\n✗ Intent structuring failed.")

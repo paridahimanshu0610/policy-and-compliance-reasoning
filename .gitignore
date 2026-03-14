@@ -1,0 +1,7 @@
+.vscode
+models
+data
+artifacts
+logs
+*/__pycache__
+*.pyc

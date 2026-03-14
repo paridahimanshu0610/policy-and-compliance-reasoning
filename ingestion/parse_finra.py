@@ -18,6 +18,7 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from pathlib import Path
+from llama_cpp import Llama
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -28,30 +29,24 @@ TARGET_RULES = [
         "category": "supervision",
         "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3110",
     },
-    {
-        "rule_id": "3120",
-        "name": "Supervisory Control System",
-        "category": "supervision",
-        "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3120",
-    },
-    {
-        "rule_id": "3130",
-        "name": "Annual Certification of Compliance and Supervisory Processes",
-        "category": "supervision",
-        "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3130",
-    },
-    {
-        "rule_id": "4511",
-        "name": "General Requirements for Books and Records",
-        "category": "recordkeeping",
-        "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4511",
-    },
-    {
-        "rule_id": "3230",
-        "name": "General Requirements for Books and Records",
-        "category": "recordkeeping",
-        "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3230",
-    },
+    # {
+    #     "rule_id": "3120",
+    #     "name": "Supervisory Control System",
+    #     "category": "supervision",
+    #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3120",
+    # },
+    # {
+    #     "rule_id": "3130",
+    #     "name": "Annual Certification of Compliance and Supervisory Processes",
+    #     "category": "supervision",
+    #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3130",
+    # },
+    # {
+    #     "rule_id": "4511",
+    #     "name": "General Requirements for Books and Records",
+    #     "category": "recordkeeping",
+    #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4511",
+    # },
 ]
 
 HEADERS = {
@@ -1012,3 +1007,407 @@ def build_normalisation_prompt(
         context_text  = context_text,
         # raw_clause_text = raw_clause_text,
     )
+
+
+# ── Model Configuration ───────────────────────────────────────────────────────
+
+MODEL_CONFIGS = {
+    "qwen": (
+        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+        "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
+    ),
+    "llama": (
+        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+        "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
+    ),
+}
+
+
+def load_normalizer_model(model_name: str = "qwen") -> Llama:
+    """
+    Loads the specified quantised GGUF model for clause normalisation.
+
+    Uses a larger context window (8192) than the intent pipeline because
+    the normalisation prompt includes the full merged clause text, which
+    can be several paragraphs long for deeply nested FINRA clauses.
+
+    Parameters
+    ----------
+    model_name : "qwen" or "llama"
+
+    Returns
+    -------
+    A loaded Llama instance ready for inference.
+    """
+    if model_name not in MODEL_CONFIGS:
+        raise ValueError(
+            f"Unknown model '{model_name}'. "
+            f"Choose from: {list(MODEL_CONFIGS)}"
+        )
+    path = MODEL_CONFIGS[model_name]
+    print(f"  Loading normaliser model: {model_name}")
+    print(f"  Path: {path}")
+    return Llama(
+        model_path   = path,
+        n_ctx        = 8192,
+        n_gpu_layers = -1,      # -1 = offload all layers to GPU if available
+        verbose      = False,
+    )
+
+
+# ── Step 3: LLM Normalisation ─────────────────────────────────────────────────
+
+def normalize_clause(
+    model:       Llama,
+    prompt:      str,
+    max_retries: int = 3,
+) -> dict | None:
+    """
+    Calls the local LLM with a fully built normalisation prompt and
+    returns the structured JSON dict the model produces.
+
+    Strips <think>...</think> blocks that Qwen models emit before the
+    JSON output, then strips accidental markdown fences, then parses.
+
+    Retries up to max_retries times on JSON parse failures or LLM errors
+    before giving up and returning None. A None return causes the caller
+    to skip that clause and log a warning — the pipeline continues.
+
+    Parameters
+    ----------
+    model       : loaded Llama instance
+    prompt      : fully built normalisation prompt string
+    max_retries : number of attempts before returning None
+
+    Returns
+    -------
+    Parsed JSON dict, or None if all retries failed.
+    """
+    import re as _re
+
+    messages = [{"role": "user", "content": prompt}]
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = model.create_chat_completion(
+                messages    = messages,
+                temperature = 0.0,   # deterministic — critical for structured output
+                max_tokens  = 1024,
+            )
+            raw = response["choices"][0]["message"]["content"].strip()
+
+            # Strip <think>...</think> blocks (Qwen reasoning traces)
+            raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL).strip()
+
+            # Strip accidental markdown fences
+            raw = _re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = _re.sub(r"\s*```$",          "", raw)
+
+            return json.loads(raw)
+
+        except json.JSONDecodeError as e:
+            print(f"    ✗ JSON parse error (attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(1)
+
+        except Exception as e:
+            print(f"    ✗ LLM error (attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(1)
+
+    return None
+
+
+# ── Step 4: Document Assembly ─────────────────────────────────────────────────
+
+def _safe_str(value) -> str:
+    """
+    Converts a value to a ChromaDB-safe string.
+
+    ChromaDB metadata fields accept only str, int, float, or bool.
+    This helper converts:
+        None  → ""          (ChromaDB rejects None)
+        list  → ", ".join   (ChromaDB rejects lists)
+        other → str(value)
+    """
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+def assemble_document(
+    raw_clause:    dict,
+    merged_clause: dict,
+    rule_meta:     dict,
+    normalized:    dict,
+) -> dict:
+    """
+    Merges raw clause fields, merged clause text, rule metadata, and
+    LLM-normalised fields into a single flat document ready for ChromaDB.
+
+    The TEXT USED FOR EMBEDDING is the merged_clause raw_text, not the
+    raw clause text. The merged text is self-contained — it includes the
+    governing obligation context — which produces more accurate semantic
+    similarity scores at retrieval time.
+
+    All metadata values are converted to ChromaDB-safe types via
+    _safe_str and explicit bool() casts. No None values or lists are
+    passed to ChromaDB.
+
+    Parameters
+    ----------
+    raw_clause    : original clause dict from parse_finra_rule
+    merged_clause : merged clause dict from build_merged_clause_set
+    rule_meta     : entry from TARGET_RULES (rule_id, name, category, url)
+    normalized    : LLM output dict from normalize_clause
+
+    Returns
+    -------
+    Flat dict with keys:
+        id        — ChromaDB document ID (= clause_ref)
+        document  — text for embedding (merged clause text)
+        all other keys — ChromaDB metadata fields
+    """
+    merged_text = merged_clause.get("raw_text") or raw_clause.get("raw_text", "")
+
+    return {
+        # ── ChromaDB identity and embedding text ──────────────────────────
+        "id":       raw_clause["clause_ref"],
+        "document": merged_text,
+
+        # ── Provenance ────────────────────────────────────────────────────
+        "clause_ref":     raw_clause["clause_ref"],
+        "parent_clause":  _safe_str(raw_clause.get("parent_clause")),
+        "clause_heading": _safe_str(raw_clause.get("clause_heading")),
+        "merged_up_to":   _safe_str(
+            merged_clause.get("merged_up_to", raw_clause["clause_ref"])
+        ),
+        "rule_id":        rule_meta["rule_id"],
+        "rule_name":      rule_meta["name"],
+        "regulator":      "FINRA",
+
+        # ── Normalised fields (LLM output) ────────────────────────────────
+        # String fields — use _safe_str to guard against None
+        "category":             _safe_str(normalized.get("category")),
+        "obligated_actor":      _safe_str(normalized.get("obligated_actor")),
+        "regulated_subject":    _safe_str(normalized.get("regulated_subject")),
+        "activity_type":        _safe_str(normalized.get("activity_type")),
+        "frequency":            _safe_str(normalized.get("frequency")),
+        "reporting_recipient":  _safe_str(normalized.get("reporting_recipient")),
+
+        # List fields — stored as comma-joined strings for ChromaDB
+        # Use $contains logic in Python post-retrieval when filtering
+        "applies_to_firm_type": _safe_str(normalized.get("applies_to_firm_type")),
+        "subject_matter":       _safe_str(normalized.get("subject_matter")),
+        "keywords":             _safe_str(normalized.get("keywords")),
+
+        # Boolean fields — explicit bool() cast guards against LLM
+        # returning 0/1 or "true"/"false" strings
+        "involves_customer":      bool(normalized.get("involves_customer",      False)),
+        "involves_third_party":   bool(normalized.get("involves_third_party",   False)),
+        "has_financial_threshold": bool(normalized.get("has_financial_threshold", False)),
+        "documentation_required": bool(normalized.get("documentation_required", False)),
+    }
+
+
+# ── Steps 1 & 2: Scraping Pipeline ───────────────────────────────────────────
+
+# PARSED_CHECKPOINT    = Path("data/parsed_rules.json")
+BASE_DIR = Path(__file__).resolve().parent.parent
+PARSED_CHECKPOINT = BASE_DIR / "data" / "parsed_rules.json"
+
+# NORMALIZED_CHECKPOINT = Path("data/normalized_documents.jsonl")
+NORMALIZED_CHECKPOINT = BASE_DIR / "data" / "normalized_documents.jsonl"
+
+
+def run_scraping_pipeline() -> dict:
+    """
+    Iterates over TARGET_RULES, scrapes each rule page, parses the
+    raw text into clause dicts, and builds merged clause sets.
+
+    Saves a checkpoint to PARSED_CHECKPOINT after all rules are
+    processed. This checkpoint is the input to run_normalization_pipeline.
+    If scraping succeeds but normalisation later fails, re-run with
+    --skip-scraping to avoid re-hitting the FINRA server.
+
+    A 1-second delay is inserted between requests as a courtesy to the
+    FINRA server.
+
+    Returns
+    -------
+    Dict keyed by rule_id:
+        {
+            "meta":    {rule_id, name, category, url},
+            "clauses": {clause_ref: raw_clause_dict, ...},    # unmerged
+            "merged":  {clause_ref: merged_clause_dict, ...}, # merged
+        }
+
+    An empty dict is returned (and logged) if no rules could be scraped.
+    """
+    PARSED_CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
+
+    all_rules: dict = {}
+
+    for rule in TARGET_RULES:
+        rule_id = rule["rule_id"]
+        print(f"\n  Rule {rule_id}: {rule['name']}")
+
+        raw_text = scrape_rule_page(rule["url"])
+        if not raw_text:
+            print(f"    ✗ Skipping — no content retrieved")
+            continue
+
+        time.sleep(1)   # polite delay
+
+        clauses_list = parse_finra_rule(raw_text, rule_id)
+        # For debugging: limit to 10 clauses per rule to speed up early runs
+        clauses_list = clauses_list[:10]
+        if not clauses_list:
+            print(f"    ✗ Skipping — no clauses parsed from raw text")
+            continue
+
+        clauses_dict = {c["clause_ref"]: c for c in clauses_list}
+        merged_dict  = build_merged_clause_set(clauses_dict)
+
+        all_rules[rule_id] = {
+            "meta":    rule,
+            "clauses": clauses_dict,
+            "merged":  merged_dict,
+        }
+        print(f"    ✓ {len(clauses_dict)} clauses parsed")
+
+    if all_rules:
+        with open(PARSED_CHECKPOINT, "w") as f:
+            json.dump(all_rules, f, indent=2)
+        print(f"\n  ✓ Scraping checkpoint saved → {PARSED_CHECKPOINT}")
+    else:
+        print("\n  ✗ No rules were successfully scraped.")
+
+    return all_rules
+
+
+# ── Step 3: Normalisation Pipeline ───────────────────────────────────────────
+
+def run_normalization_pipeline(
+    model:     Llama,
+    all_rules: dict,
+) -> list[dict]:
+    """
+    Normalises every clause in all_rules using the local LLM, assembles
+    the final document dicts, and writes them incrementally to
+    NORMALIZED_CHECKPOINT as a JSONL file.
+
+    RESUME SUPPORT
+    Clause_refs already present in the checkpoint file are skipped on
+    re-run. This means if the process is killed partway through (which
+    is likely given the number of clauses and local inference speed),
+    simply re-running the script resumes exactly where it left off.
+
+    PROGRESS LOGGING
+    Each clause is logged with its position in the full work queue
+    (e.g. [47/312]) so you can estimate remaining time.
+
+    Parameters
+    ----------
+    model     : loaded Llama instance from load_normalizer_model
+    all_rules : dict returned by run_scraping_pipeline
+
+    Returns
+    -------
+    Full list of assembled document dicts (existing + newly normalised).
+    This is passed directly to ingest_documents in build_knowledge_base.py.
+    """
+    NORMALIZED_CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── Load already-processed clause_refs for resume support ────────────
+    processed_refs: set[str] = set()
+    existing_docs:  list[dict] = []
+
+    if NORMALIZED_CHECKPOINT.exists():
+        with open(NORMALIZED_CHECKPOINT, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    doc = json.loads(line)
+                    processed_refs.add(doc["clause_ref"])
+                    existing_docs.append(doc)
+        if processed_refs:
+            print(f"  Resuming: {len(processed_refs)} clauses already normalised")
+
+    # ── Count total work remaining ────────────────────────────────────────
+    total     = sum(len(r["clauses"]) for r in all_rules.values())
+    remaining = total - len(processed_refs)
+    print(f"  Total clauses: {total}  |  Already done: {len(processed_refs)}  "
+          f"|  Remaining: {remaining}")
+
+    if remaining == 0:
+        print("  ✓ All clauses already normalised.")
+        return existing_docs
+
+    new_docs:   list[dict] = []
+    skipped:    list[str]  = []
+    done_count: int        = len(processed_refs)
+
+    # Open in append mode so existing progress is preserved
+    with open(NORMALIZED_CHECKPOINT, "a") as out_f:
+
+        for rule_id, rule_data in all_rules.items():
+            rule_meta    = rule_data["meta"]
+            clauses_dict = rule_data["clauses"]
+            merged_dict  = rule_data["merged"]
+
+            for clause_ref, raw_clause in clauses_dict.items():
+
+                if clause_ref in processed_refs:
+                    continue   # already in checkpoint
+
+                done_count += 1
+                print(
+                    f"  [{done_count}/{total}] {clause_ref} ...",
+                    end=" ", flush=True
+                )
+
+                # Build the context bundle and full normalisation prompt
+                bundle = build_context_bundle(clause_ref, clauses_dict)
+                prompt = build_normalisation_prompt(
+                    bundle      = bundle,
+                    rule_id     = rule_id,
+                    rule_name   = rule_meta["name"],
+                    all_clauses = clauses_dict,
+                )
+
+                normalized = normalize_clause(model, prompt)
+
+                if normalized is None:
+                    print("✗ skipped (normalisation failed after retries)")
+                    skipped.append(clause_ref)
+                    continue
+
+                merged_clause = merged_dict.get(clause_ref, raw_clause)
+                doc = assemble_document(
+                    raw_clause    = raw_clause,
+                    merged_clause = merged_clause,
+                    rule_meta     = rule_meta,
+                    normalized    = normalized,
+                )
+
+                # Write immediately — preserves progress on crash
+                out_f.write(json.dumps(doc) + "\n")
+                out_f.flush()
+
+                new_docs.append(doc)
+                print("✓")
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    print(f"\n  ✓ Normalisation run complete.")
+    print(f"    Newly normalised : {len(new_docs)}")
+    print(f"    Skipped (failed) : {len(skipped)}")
+    if skipped:
+        print("    Failed refs:")
+        for ref in skipped:
+            print(f"      {ref}")
+    print(f"  ✓ Checkpoint updated → {NORMALIZED_CHECKPOINT}")
+
+    return existing_docs + new_docs
