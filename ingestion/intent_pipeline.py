@@ -77,7 +77,8 @@ Go through each field in order and mark it as CLEAR or MISSING:
   3. involves_customer: whether a customer or their account
      is affected
      CLEAR if: the user explicitly mentions a customer, OR
-     explicitly states no customer is involved
+     explicitly states no customer is involved, OR expresses
+     uncertainty OR lack of knowledge about customer involvement
      MISSING if: the user has not mentioned customers at all
      Question if missing: "Does this situation involve a
      customer or their account?"
@@ -86,7 +87,8 @@ Go through each field in order and mark it as CLEAR or MISSING:
      is involved
      CLEAR if: the user explicitly mentions an outside party
      such as a bank, exchange, or outside employer, OR
-     explicitly states no outside party is involved
+     explicitly states no outside party is involved, OR expresses 
+     uncertainty OR lack of knowledge about outside parties
      MISSING if: the user has not mentioned any outside party
      Question if missing: "Does this situation involve any
      party outside your firm?"
@@ -94,7 +96,8 @@ Go through each field in order and mark it as CLEAR or MISSING:
   5. has_financial_threshold: whether a specific financial
      figure or threshold is relevant
      CLEAR if: the user mentions a specific amount or figure,
-     OR explicitly states no financial figure is relevant
+     OR explicitly states no financial figure is relevant, OR
+     expresses uncertainty OR lack of knowledge about financial thresholds
      MISSING if: the user has not mentioned any financial
      figure at all
      Question if missing: "Is there a specific financial
@@ -109,10 +112,8 @@ Output your assessment in exactly this format before doing anything else:
 5. has_financial_threshold: CLEAR or MISSING
 
 Then:
-- If ANY field is MISSING and you have not yet reached the question
-  limit, ask the question for the first missing field.
-- If ALL fields are CLEAR, or you have reached the question limit,
-  proceed to [READY_TO_STRUCTURE].
+- If ANY field is MISSING, ask the question for that particular missing field.
+- If ALL fields are CLEAR,proceed to [READY_TO_STRUCTURE].
 
 RULES — FOLLOW THESE EXACTLY:
 
@@ -134,8 +135,6 @@ QUESTION RULES:
 - Only ask about fields that are genuinely missing from what the user
   has said. Do not ask about anything already stated or clearly implied.
 - Do not repeat a question you have already asked.
-- Do not ask more than {max_questions} question(s) total. After that,
-  proceed to [READY_TO_STRUCTURE] regardless of remaining gaps.
 - If the user responds to a question with uncertainty — for example
   "I don't know", "I'm not sure", "I'm not certain", or any similar
   expression of not knowing — treat that field as CLEAR with an
@@ -527,7 +526,7 @@ def _strip_think_tags(text: str) -> str:
 def run_clarification_agent(
     model:         Llama,
     first_query:   str,
-    max_questions: int = 5,
+    max_questions: int = 10,
 ) -> str:
 
     conversation: list[dict] = [
@@ -630,7 +629,7 @@ def extract_structured_intent(
 def run_intent_pipeline(
     model:         Llama,
     first_query:   str,
-    max_questions: int = 5,
+    max_questions: int = 10,
 ) -> tuple[dict, str] | None:
     """
     Runs the full intent pipeline: clarification agent followed by
@@ -667,6 +666,137 @@ def run_intent_pipeline(
         return None
  
     return intent, situation_summary
+
+def _strip_field_assessment(text: str) -> str:
+    """
+    Removes the internal field assessment block that the model sometimes
+    leaks into its output. The assessment always follows the pattern:
+        1. activity: CLEAR or MISSING
+        2. actor: CLEAR or MISSING
+        ...
+    This strips any leading lines matching that pattern before the
+    actual question or summary content begins.
+    """
+    import re
+    # Remove lines like "1. activity: CLEAR" or "2. actor: MISSING"
+    cleaned = re.sub(
+        r"(?m)^\d+\.\s+\w[\w_]*:\s*(CLEAR|MISSING)[^\n]*\n?",
+        "",
+        text,
+    )
+    return cleaned.strip()
+
+# ── Server-compatible clarification turn ─────────────────────────────────────
+#
+# The existing run_clarification_agent() uses an input() loop which is not
+# usable in a web server context. process_clarification_turn() is a single-
+# turn version that processes exactly one user message and returns, making it
+# suitable for a request/response API.
+ 
+def process_clarification_turn(
+    model:           "Llama",
+    user_message:    str,
+    conversation:    list[dict],
+    questions_asked: int,
+    max_questions:   int = 10,
+) -> dict:
+    """
+    Processes a single turn of the clarification conversation and returns
+    a result dict. Does not loop or call input() — designed for use in a
+    web server where each HTTP request is one turn.
+ 
+    If conversation is empty, this is the first message and the system
+    prompt is injected automatically.
+ 
+    Parameters
+    ----------
+    model           : loaded Llama instance
+    user_message    : the user's latest message
+    conversation    : current conversation history (list of role/content dicts)
+                      Pass [] for the very first turn.
+    questions_asked : number of clarifying questions already asked this session
+    max_questions   : maximum questions allowed before forcing [READY_TO_STRUCTURE]
+ 
+    Returns
+    -------
+    Dict with keys:
+        type            : "question" | "ready"
+        content         : the question text  OR  the situation summary
+        conversation    : updated conversation history (with this turn appended)
+        questions_asked : updated question count
+    """
+    # Initialise conversation with system prompt on the very first turn
+    if not conversation:
+        conversation = [
+            {
+                "role":    "system",
+                "content": CLARIFICATION_SYSTEM_PROMPT.format(
+                    max_questions=max_questions
+                ),
+            }
+        ]
+ 
+    # Append the user's message
+    conversation = conversation + [{"role": "user", "content": user_message}]
+ 
+    # ── LLM call ──────────────────────────────────────────────────────────
+    raw_reply = _llm_call(model, conversation, temp=0.3)
+    print(f"\n[Debug] Raw reply:\n{raw_reply}\n")
+    reply_raw     = _strip_think_tags(raw_reply)            # keep think tags stripped, assessment intact
+    reply_display     = _strip_field_assessment(reply_raw)  # strip assessment only for UI output
+ 
+    # ── Check for ready signal ────────────────────────────────────────────
+    if "[READY_TO_STRUCTURE]" in reply_raw:
+        parts   = reply_raw.split("[READY_TO_STRUCTURE]", 1)
+        summary = parts[1].strip() if len(parts) > 1 else ""
+        # Append the assistant's final message to keep history complete
+        conversation = conversation + [{"role": "assistant", "content": reply_raw}]
+        return {
+            "type":            "ready",
+            "content":         summary,
+            "conversation":    conversation,
+            "questions_asked": questions_asked,
+        }
+ 
+    # ── Count question if the reply contains one ──────────────────────────
+    if "?" in reply_raw:
+        questions_asked += 1
+ 
+    # Append the assistant's question to conversation history
+    conversation = conversation + [{"role": "assistant", "content": reply_raw}]
+ 
+    # ── Max questions reached — force [READY_TO_STRUCTURE] ───────────────
+    if questions_asked >= max_questions:
+        forced_conv = conversation + [{
+            "role":    "user",
+            "content": "That is all the information I can provide. "
+                       "Please proceed with what you have.",
+        }]
+        forced_raw   = _llm_call(model, forced_conv, temp=0.0)
+        forced_reply = _strip_think_tags(forced_raw)
+ 
+        if "[READY_TO_STRUCTURE]" in forced_reply:
+            parts   = forced_reply.split("[READY_TO_STRUCTURE]", 1)
+            summary = parts[1].strip() if len(parts) > 1 else forced_reply
+        else:
+            summary = forced_reply
+ 
+        conversation = forced_conv + [{"role": "assistant", "content": forced_reply}]
+        return {
+            "type":            "ready",
+            "content":         summary,
+            "conversation":    conversation,
+            "questions_asked": questions_asked,
+        }
+ 
+    # ── Still clarifying ──────────────────────────────────────────────────
+    return {
+        "type":            "question",
+        "content":         reply_display,
+        "conversation":    conversation,
+        "questions_asked": questions_asked,
+    }
+
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 

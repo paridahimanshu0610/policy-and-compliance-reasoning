@@ -76,7 +76,7 @@ MODEL_CONFIGS = {
 }
 
 DEFAULT_TOP_K         = 5
-MAX_CLARIFY_QUESTIONS = 5
+MAX_CLARIFY_QUESTIONS = 10
 
 
 # ── Model Loader ──────────────────────────────────────────────────────────────

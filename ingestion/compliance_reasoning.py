@@ -320,3 +320,107 @@ def run_compliance_reasoning(
 
     raw_answer = _call_reasoning_model(model, prompt)
     return _parse_sections(raw_answer)
+
+# ── Follow-up Reasoning ───────────────────────────────────────────────────────
+ 
+FOLLOWUP_SYSTEM_PROMPT = """You are a FINRA compliance analyst. You have already \
+analyzed a compliance situation and provided a detailed answer. The user now has \
+a follow-up question.
+ 
+RULES
+=====
+1. Answer ONLY based on the retrieved clauses and your previous analysis below.
+2. Do not retrieve new information or cite rules not already in the context.
+3. Keep your answer concise and directly responsive to the question.
+4. If the question cannot be answered from the available context, say so clearly.
+5. Do not repeat your full previous analysis — reference it where relevant.
+ 
+ORIGINAL SITUATION
+==================
+{situation_summary}
+ 
+RETRIEVED CLAUSES
+=================
+{formatted_clauses}
+ 
+YOUR PREVIOUS COMPLIANCE ANALYSIS
+==================================
+{initial_reasoning}"""
+ 
+ 
+def run_followup_reasoning(
+    model:                 "Llama",
+    situation_summary:     str,
+    retrieved_clauses:     list[dict],
+    initial_reasoning_raw: str,
+    followup_history:      list[dict],
+    new_question:          str,
+) -> str:
+    """
+    Answers a follow-up question about a compliance analysis that has
+    already been delivered.
+ 
+    Uses the original retrieved clauses and compliance analysis as a
+    fixed system context. No new retrieval is performed. The follow-up
+    conversation history is passed as alternating user/assistant messages
+    so the model can maintain conversational coherence across multiple
+    follow-up turns.
+ 
+    Parameters
+    ----------
+    model                 : loaded Llama instance
+    situation_summary     : situation summary from the clarification agent
+    retrieved_clauses     : list of clause result dicts from retrieve_clauses()
+    initial_reasoning_raw : the "raw" field from the first run_compliance_reasoning() call
+    followup_history      : list of {role, content} dicts from previous follow-up turns
+                            Pass [] for the first follow-up question.
+    new_question          : the user's new follow-up question string
+ 
+    Returns
+    -------
+    The model's follow-up answer as a plain string.
+    """
+    # Truncate clauses at a shorter limit than the main reasoning prompt
+    # because the follow-up prompt also includes the initial analysis,
+    # making the context budget tighter.
+    MAX_CLAUSE_CHARS = 400
+ 
+    formatted_clauses_parts = []
+    for i, clause in enumerate(retrieved_clauses, 1):
+        ref   = clause.get("clause_ref", "unknown")
+        text  = clause.get("document", "")
+        if len(text) > MAX_CLAUSE_CHARS:
+            text = text[:MAX_CLAUSE_CHARS].rstrip() + "..."
+        formatted_clauses_parts.append(f"[{i}] {ref}\n{text}")
+    formatted_clauses = "\n\n".join(formatted_clauses_parts)
+ 
+    # Truncate initial reasoning to prevent the context budget from being
+    # dominated by the previous answer on long reasoning outputs.
+    MAX_REASONING_CHARS = 1200
+    if len(initial_reasoning_raw) > MAX_REASONING_CHARS:
+        initial_reasoning_raw = initial_reasoning_raw[:MAX_REASONING_CHARS].rstrip() + "..."
+ 
+    system_content = FOLLOWUP_SYSTEM_PROMPT.format(
+        situation_summary = situation_summary,
+        formatted_clauses = formatted_clauses,
+        initial_reasoning = initial_reasoning_raw,
+    )
+ 
+    # Build the messages list:
+    # [system] → [follow-up history...] → [new question]
+    messages: list[dict] = [{"role": "system", "content": system_content}]
+    messages.extend(followup_history)
+    messages.append({"role": "user", "content": new_question})
+ 
+    response = model.create_chat_completion(
+        messages    = messages,
+        temperature = 0.1,
+        max_tokens  = 512,   # shorter than main reasoning — follow-ups should be concise
+    )
+    raw = response["choices"][0]["message"]["content"].strip()
+ 
+    # Strip Qwen reasoning traces
+    import re as _re
+    raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL).strip()
+ 
+    return raw
