@@ -42,13 +42,16 @@ Usage:
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from pathlib import Path
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-CHROMA_PATH      = "data/chromadb"
+BASE_DIR = Path(__file__).resolve().parent.parent
+CHROMA_PATH      = BASE_DIR / "data/chromadb"
+
 COLLECTION_NAME  = "finra_clauses"
 EMBEDDING_MODEL  = "all-MiniLM-L6-v2"
-DEFAULT_TOP_K    = 10
+DEFAULT_TOP_K    = 5
 
 # Fields that carry enough discriminating power to use as hard filters.
 # Fields not in this list are used only for query construction, not filtering.
@@ -174,62 +177,25 @@ def _build_where_filter(intent: dict) -> dict | None:
 # ── Query String Builder ──────────────────────────────────────────────────────
 
 def _build_query_string(intent: dict) -> str:
-    """
-    Constructs a natural language query string for semantic similarity
-    search from the intent JSON.
-
-    The query is built from the most semantically expressive fields:
-    activity_type, regulated_subject, subject_matter, and the raw
-    situation summary if present. This gives the embedding model
-    enough signal to rank clause documents meaningfully within the
-    filtered candidate set.
-
-    The query is deliberately human-readable so that the same
-    sentence-transformer embedding space is used consistently between
-    query time and the merged clause text stored at ingestion time.
-
-    Parameters
-    ----------
-    intent : structured intent dict from extract_structured_intent
-
-    Returns
-    -------
-    A natural language query string. Never empty — falls back to
-    "FINRA compliance obligation" if no fields are usable.
-    """
-    parts: list[str] = []
-
-    activity = intent.get("activity_type", "")
-    if activity:
-        # Convert underscore-separated activity names to readable phrases
-        parts.append(activity.replace("_", " "))
-
-    subject = intent.get("regulated_subject", "")
-    if subject:
-        parts.append(subject.replace("_", " "))
-
-    obligated = intent.get("obligated_actor", "")
-    if obligated:
-        parts.append(f"{obligated.replace('_', ' ')} obligation")
-
-    # subject_matter tags are comma-separated strings stored from ingestion;
-    # at query time, intent["subject_matter"] is a list from the LLM output.
-    subject_matter = intent.get("subject_matter", [])
-    if isinstance(subject_matter, list) and subject_matter:
-        parts.extend(tag.replace("_", " ") for tag in subject_matter[:4])
-    elif isinstance(subject_matter, str) and subject_matter:
-        parts.append(subject_matter.replace("_", " "))
-
-    # The situation summary is the richest semantic signal available.
-    # If the caller passes it through in the intent dict (optional), use it.
-    summary = intent.get("situation_summary", "")
+    # The situation summary is natural language and matches the embedding
+    # space of the stored merged clause texts directly. Use it alone when
+    # available — adding structured field fragments on top dilutes the signal.
+    summary = intent.get("situation_summary", "").strip()
     if summary:
-        parts.append(summary)
+        return summary
 
-    if not parts:
-        return "FINRA compliance obligation"
+    # Fallback: no summary available, construct a natural language sentence
+    # from the structured fields rather than dot-separating fragments.
+    activity  = intent.get("activity_type",    "").replace("_", " ")
+    subject   = intent.get("regulated_subject","").replace("_", " ")
+    actor     = intent.get("obligated_actor",  "").replace("_", " ")
 
-    return ". ".join(parts)
+    parts = [p for p in [actor, activity, subject] if p]
+
+    if parts:
+        return f"FINRA compliance obligation concerning {', '.join(parts)}"
+
+    return "FINRA compliance obligation"
 
 
 # ── Post-retrieval Helpers ────────────────────────────────────────────────────
@@ -263,8 +229,10 @@ def _firm_type_matches(doc_meta: dict, intent_firm_types: list[str]) -> bool:
         return True   # no firm type stored — do not exclude
 
     stored_types = {t.strip() for t in stored.split(",")}
-    return bool(stored_types & set(intent_firm_types))
-
+    # Even a single match is enough. For example, if the intent says applies_to_firm_type=["broker_dealer"], 
+    # then a clause with applies_to_firm_type=["broker_dealer,investment_adviser"] should match because it does 
+    # apply to broker-dealers even though it also applies to other firm types.
+    return bool(stored_types & set(intent_firm_types)) 
 
 def _format_results(
     query_result: dict,
@@ -296,6 +264,7 @@ def _format_results(
     primary:   list[dict] = []
     secondary: list[dict] = []
 
+    # The query_result contains lists of lists (one per query), but we only query with one query string, so we take the first element of each.
     ids        = query_result["ids"][0]
     documents  = query_result["documents"][0]
     metadatas  = query_result["metadatas"][0]
@@ -361,7 +330,8 @@ def retrieve_clauses(
     where_filter = _build_where_filter(intent)
     query_string = _build_query_string(intent)
 
-    print(f"\n  Query: \"{query_string[:80]}{'...' if len(query_string) > 80 else ''}\"")
+    # print(f"\n  Query: \"{query_string[:80]}{'...' if len(query_string) > 80 else ''}\"")
+    print(f"\n  Query: \"{query_string}\"")
     if where_filter:
         print(f"  Filter: {where_filter}")
     else:

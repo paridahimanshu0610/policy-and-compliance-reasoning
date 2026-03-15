@@ -630,7 +630,7 @@ def extract_structured_intent(
 def run_intent_pipeline(
     model:         Llama,
     first_query:   str,
-    max_questions: int = 3,
+    max_questions: int = 5,
 ) -> tuple[dict, str] | None:
     """
     Runs the full intent pipeline: clarification agent followed by

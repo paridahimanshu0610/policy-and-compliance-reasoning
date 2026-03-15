@@ -152,7 +152,7 @@ def _format_clauses_for_prompt(retrieved_clauses: list[dict]) -> str:
     -------
     A formatted multi-clause string ready for prompt insertion.
     """
-    MAX_CLAUSE_CHARS = 600
+    MAX_CLAUSE_CHARS = 1000  # Truncate clause text to this length for the prompt
     sections: list[str] = []
 
     for i, clause in enumerate(retrieved_clauses, 1):
@@ -164,7 +164,7 @@ def _format_clauses_for_prompt(retrieved_clauses: list[dict]) -> str:
 
         # Truncate long clause texts to preserve context budget
         if len(doc_text) > MAX_CLAUSE_CHARS:
-            doc_text = doc_text[:MAX_CLAUSE_CHARS].rstrip() + "..."
+            doc_text = "..." + doc_text[-MAX_CLAUSE_CHARS:].rstrip()
 
         header = f"[{i}] {ref}"
         if rule_name:

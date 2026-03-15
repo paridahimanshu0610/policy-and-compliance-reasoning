@@ -19,6 +19,7 @@ import requests
 from bs4 import BeautifulSoup
 from pathlib import Path
 from llama_cpp import Llama
+import uuid
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -304,6 +305,8 @@ def parse_finra_rule(text: str, rule_id: str) -> list[dict]:
     """
     Splits the document into Main Text and Supplementary Material, 
     then processes both streams through the clause chunker.
+
+    The raw_text key in the resulting clause dicts is the original unmodified text from the rule. It is not accumulated or merged in any way.
     """
     # Updated regex to tolerate the hidden HEADING_MARKER (\ue000) 
     # anywhere before the bullets or before the text itself.
@@ -375,7 +378,7 @@ def should_merge_upward(raw_text: str, clause_heading: str = "") -> bool:
     return False
 
 
-def merge_clause_to_completion(start_ref: str, all_clauses: dict) -> dict:
+def merge_clause_to_completion(start_ref: str, all_clauses: dict, merge_until_root = False) -> dict:
     """
     Starting from start_ref, walks upward through the ancestor chain,
     collecting nodes until it finds one whose ORIGINAL text is
@@ -418,7 +421,7 @@ def merge_clause_to_completion(start_ref: str, all_clauses: dict) -> dict:
         original_text = node["raw_text"]
         heading       = node.get("clause_heading", "")
 
-        if not should_merge_upward(original_text, heading):
+        if (not merge_until_root) and (not should_merge_upward(original_text, heading)):
             # This node is complete on its own — stop walking upward
             break
 
@@ -449,6 +452,12 @@ def build_merged_clause_set(all_clauses: dict) -> dict:
     """
     Applies merge_clause_to_completion to every clause in all_clauses
     and returns a new dict of merged clauses keyed by clause_ref.
+    The raw_text of each clause in the output is the merged text from its stopping ancestor down to itself.
+    The stopping ancestor is the nearest ancestor (including itself) whose original text is self-complete enough to stop the merge walk. 
+    This ensures that each clause's raw_text is as self-contained and context-rich as possible without risking the trap of over-merging.
+    The condition to check the original text of ancestors for merge-worthiness is encapsulated in should_merge_upward, 
+    which is carefully designed to avoid false positives triggered by inherited punctuation in the merged text. 
+    Note that in should_merge_upward, all evaluations are based on the original raw_text from all_clauses, never on the accumulated merged text, which is what prevents the trap.
 
     Clauses that are already complete are returned unchanged.
     """
@@ -965,7 +974,7 @@ def format_bundle_for_prompt(bundle: dict) -> str:
 # ── Prompt Builder ────────────────────────────────────────────────────────────
 
 def build_normalisation_prompt(
-    bundle:    dict,
+    target:    dict,
     rule_id:   str,
     rule_name: str,
     all_clauses: dict
@@ -976,8 +985,7 @@ def build_normalisation_prompt(
 
     Parameters
     ──────────
-    bundle    : output of build_context_bundle — contains ancestors
-                and target_clause
+    target   : dict containing the target clause's raw_text, clause_ref, and parent_clause
     rule_id   : FINRA rule number, e.g. "3110"
     rule_name : human-readable rule name, e.g. "Supervision"
 
@@ -985,14 +993,13 @@ def build_normalisation_prompt(
     ───────
     A fully populated prompt string ready for LLM inference.
     """
-    target     = bundle["target_clause"]
     target_clause = target.get("raw_text", "")
     
     clause_ref = target["clause_ref"]
     parent_ref = target.get("parent_clause") or "null"
 
     # Merging the current clause with all its ancestors to build a full clause
-    context_text = merge_clause_to_completion(clause_ref, all_clauses)
+    context_text = merge_clause_to_completion(clause_ref, all_clauses, merge_until_root=True)
     context_text = context_text.get("raw_text", "")
     
     # Format the bundle into the RAW CLAUSE TEXT block
@@ -1049,7 +1056,7 @@ def load_normalizer_model(model_name: str = "qwen") -> Llama:
     print(f"  Path: {path}")
     return Llama(
         model_path   = path,
-        n_ctx        = 8192,
+        n_ctx        = 16384,
         n_gpu_layers = -1,      # -1 = offload all layers to GPU if available
         verbose      = False,
     )
@@ -1092,7 +1099,7 @@ def normalize_clause(
             response = model.create_chat_completion(
                 messages    = messages,
                 temperature = 0.0,   # deterministic — critical for structured output
-                max_tokens  = 1024,
+                max_tokens  = 4096,
             )
             raw = response["choices"][0]["message"]["content"].strip()
 
@@ -1174,7 +1181,7 @@ def assemble_document(
 
     return {
         # ── ChromaDB identity and embedding text ──────────────────────────
-        "id":       raw_clause["clause_ref"],
+        "id":       _safe_str(uuid.uuid4()), # raw_clause["clause_ref"],
         "document": merged_text,
 
         # ── Provenance ────────────────────────────────────────────────────
@@ -1263,7 +1270,7 @@ def run_scraping_pipeline() -> dict:
 
         clauses_list = parse_finra_rule(raw_text, rule_id)
         # For debugging: limit to 10 clauses per rule to speed up early runs
-        clauses_list = clauses_list[:10]
+        # clauses_list = clauses_list[:10]
         if not clauses_list:
             print(f"    ✗ Skipping — no clauses parsed from raw text")
             continue
@@ -1370,9 +1377,10 @@ def run_normalization_pipeline(
                 )
 
                 # Build the context bundle and full normalisation prompt
-                bundle = build_context_bundle(clause_ref, clauses_dict)
+                # bundle = build_context_bundle(clause_ref, clauses_dict)
+
                 prompt = build_normalisation_prompt(
-                    bundle      = bundle,
+                    target      = raw_clause,
                     rule_id     = rule_id,
                     rule_name   = rule_meta["name"],
                     all_clauses = clauses_dict,

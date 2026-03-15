@@ -11,7 +11,7 @@ compliance assistant:
         │
         ▼
     Clarification agent  (intent_pipeline.py)
-    asks up to 3 targeted questions
+    asks up to 5 targeted questions
         │
         ▼
     Situation summary + Structured intent JSON
@@ -75,8 +75,8 @@ MODEL_CONFIGS = {
     ),
 }
 
-DEFAULT_TOP_K         = 10
-MAX_CLARIFY_QUESTIONS = 3
+DEFAULT_TOP_K         = 5
+MAX_CLARIFY_QUESTIONS = 5
 
 
 # ── Model Loader ──────────────────────────────────────────────────────────────

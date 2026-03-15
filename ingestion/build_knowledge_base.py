@@ -48,7 +48,8 @@ from parse_finra import (
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-CHROMA_PATH     = "data/chromadb"       # persistent storage location
+BASE_DIR = Path(__file__).resolve().parent.parent
+CHROMA_PATH      = BASE_DIR / "data/chromadb" # persistent storage location
 COLLECTION_NAME = "finra_clauses"       # ChromaDB collection name
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"   # lightweight, works well on CPU
 BATCH_SIZE      = 50                    # documents per ChromaDB write
