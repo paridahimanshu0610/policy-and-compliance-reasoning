@@ -798,6 +798,36 @@ def process_clarification_turn(
     }
 
 
+def extract_structured_intent_api(situation_summary: str) -> dict | None:
+    """
+    API-backed version of extract_structured_intent.
+    Used by the MCP server so it has no local model dependency.
+    Requires ANTHROPIC_API_KEY environment variable.
+    """
+    import anthropic
+    import os
+    import re
+
+    prompt = INTENT_EXTRACTION_PROMPT.format(
+        situation_summary=situation_summary
+    )
+
+    client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    message = client.messages.create(
+        model    = "claude-sonnet-4-20250514",
+        max_tokens = 1024,
+        messages = [{"role": "user", "content": prompt}],
+    )
+    raw = message.content[0].text.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$",          "", raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"✗ Failed to parse intent: {e}")
+        return None
+
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
