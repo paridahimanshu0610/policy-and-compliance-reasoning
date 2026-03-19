@@ -57,26 +57,26 @@ import textwrap
 
 from llama_cpp import Llama
 
-from intent_pipeline       import run_intent_pipeline
-from retrieval             import load_collection, retrieve_clauses
-from compliance_reasoning  import load_reasoning_model, run_compliance_reasoning
-
+from pipeline.intent_pipeline       import run_intent_pipeline
+from pipeline.retrieval             import load_collection, retrieve_clauses
+from pipeline.compliance_reasoning  import load_reasoning_model, run_compliance_reasoning
+from config.settings import MODEL_CONFIGS, DEFAULT_TOP_K, MAX_CLARIFY_QUESTIONS
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-MODEL_CONFIGS = {
-    "qwen": (
-        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-        "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
-    ),
-    "llama": (
-        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-        "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
-    ),
-}
+# MODEL_CONFIGS = {
+#     "qwen": (
+#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#         "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
+#     ),
+#     "llama": (
+#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#         "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
+#     ),
+# }
 
-DEFAULT_TOP_K         = 5
-MAX_CLARIFY_QUESTIONS = 10
+# DEFAULT_TOP_K         = 5
+# MAX_CLARIFY_QUESTIONS = 10
 
 
 # ── Model Loader ──────────────────────────────────────────────────────────────
@@ -372,8 +372,8 @@ Examples:
     parser.add_argument(
         "--model",
         choices = ["qwen", "llama"],
-        default = "qwen",
-        help    = "Local model to use  (default: qwen)",
+        default = "llama",
+        help    = "Local model to use  (default: llama)",
     )
     parser.add_argument(
         "--top-k",

@@ -23,19 +23,21 @@ Usage:
 
 import re
 from llama_cpp import Llama
+from config.prompts import COMPLIANCE_REASONING_PROMPT, FOLLOWUP_SYSTEM_PROMPT
+from config.settings import MODEL_CONFIGS, MAX_CLAUSE_CHARS, MAX_REASONING_CHARS
 
 # ── Model Configuration ───────────────────────────────────────────────────────
 
-MODEL_CONFIGS = {
-    "qwen": (
-        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-        "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
-    ),
-    "llama": (
-        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-        "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
-    ),
-}
+# MODEL_CONFIGS = {
+#     "qwen": (
+#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#         "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
+#     ),
+#     "llama": (
+#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#         "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
+#     ),
+# }
 
 
 def load_reasoning_model(model_name: str = "qwen") -> Llama:
@@ -59,7 +61,7 @@ def load_reasoning_model(model_name: str = "qwen") -> Llama:
             f"Unknown model '{model_name}'. "
             f"Choose from: {list(MODEL_CONFIGS)}"
         )
-    path = MODEL_CONFIGS[model_name]
+    path = MODEL_CONFIGS[model_name]["path"]
     print(f"  Loading reasoning model: {model_name}")
     print(f"  Path: {path}")
     return Llama(
@@ -72,60 +74,60 @@ def load_reasoning_model(model_name: str = "qwen") -> Llama:
 
 # ── Prompt Template ───────────────────────────────────────────────────────────
 
-COMPLIANCE_REASONING_PROMPT = """You are a FINRA compliance analyst. A compliance \
-situation has been described to you. You have been given a set of retrieved \
-FINRA rule clauses that are potentially relevant. Your job is to reason over \
-the clauses and produce a clear, well-supported compliance answer.
+# COMPLIANCE_REASONING_PROMPT = """You are a FINRA compliance analyst. A compliance \
+# situation has been described to you. You have been given a set of retrieved \
+# FINRA rule clauses that are potentially relevant. Your job is to reason over \
+# the clauses and produce a clear, well-supported compliance answer.
 
-CRITICAL RULES
-==============
-1. Base your answer ONLY on the provided clauses. Do not cite rules or \
-obligations that are not present in the retrieved clauses below.
-2. If none of the retrieved clauses are directly applicable, say so clearly \
-and explain why.
-3. Always cite the specific clause reference (e.g. FINRA-3110(a)(1)) when \
-making a compliance statement.
-4. Keep your answer focused. Do not repeat clause text verbatim at length — \
-paraphrase and cite.
-5. If the situation involves conditions or triggers, identify them explicitly.
-6. Do not give legal advice. State what the rules require, not what the \
-user should do strategically.
+# CRITICAL RULES
+# ==============
+# 1. Base your answer ONLY on the provided clauses. Do not cite rules or \
+# obligations that are not present in the retrieved clauses below.
+# 2. If none of the retrieved clauses are directly applicable, say so clearly \
+# and explain why.
+# 3. Always cite the specific clause reference (e.g. FINRA-3110(a)(1)) when \
+# making a compliance statement.
+# 4. Keep your answer focused. Do not repeat clause text verbatim at length — \
+# paraphrase and cite.
+# 5. If the situation involves conditions or triggers, identify them explicitly.
+# 6. Do not give legal advice. State what the rules require, not what the \
+# user should do strategically.
 
-OUTPUT FORMAT
-=============
-Structure your answer in exactly these four sections.
-Use the exact section headers shown below.
+# OUTPUT FORMAT
+# =============
+# Structure your answer in exactly these four sections.
+# Use the exact section headers shown below.
 
-DETERMINATION
-State clearly whether the situation triggers a compliance obligation, \
-is permitted, requires action, or is ambiguous based on the retrieved clauses.
-Keep this to 2-3 sentences.
+# DETERMINATION
+# State clearly whether the situation triggers a compliance obligation, \
+# is permitted, requires action, or is ambiguous based on the retrieved clauses.
+# Keep this to 2-3 sentences.
 
-APPLICABLE CLAUSES
-List each directly applicable clause reference and one sentence explaining \
-why it applies. Use this format for each entry:
-- [clause_ref]: explanation
+# APPLICABLE CLAUSES
+# List each directly applicable clause reference and one sentence explaining \
+# why it applies. Use this format for each entry:
+# - [clause_ref]: explanation
 
-REASONING
-Explain step by step how the applicable clauses lead to your determination. \
-Reference specific clause requirements. Note any conditions, thresholds, or \
-exceptions that affect the answer.
+# REASONING
+# Explain step by step how the applicable clauses lead to your determination. \
+# Reference specific clause requirements. Note any conditions, thresholds, or \
+# exceptions that affect the answer.
 
-CAVEATS
-List any important limitations of this answer — for example, clauses that \
-could not be retrieved, conditions that depend on facts not provided, or \
-situations where a different rule series might also apply.
-If there are no caveats, write "None."
+# CAVEATS
+# List any important limitations of this answer — for example, clauses that \
+# could not be retrieved, conditions that depend on facts not provided, or \
+# situations where a different rule series might also apply.
+# If there are no caveats, write "None."
 
-SITUATION
-=========
-{situation_summary}
+# SITUATION
+# =========
+# {situation_summary}
 
-RETRIEVED CLAUSES
-=================
-{formatted_clauses}
+# RETRIEVED CLAUSES
+# =================
+# {formatted_clauses}
 
-Now produce your compliance analysis following the output format above."""
+# Now produce your compliance analysis following the output format above."""
 
 
 # ── Clause Formatter ──────────────────────────────────────────────────────────
@@ -152,7 +154,7 @@ def _format_clauses_for_prompt(retrieved_clauses: list[dict]) -> str:
     -------
     A formatted multi-clause string ready for prompt insertion.
     """
-    MAX_CLAUSE_CHARS = 1000  # Truncate clause text to this length for the prompt
+    # MAX_CLAUSE_CHARS = 1000  # Truncate clause text to this length for the prompt
     sections: list[str] = []
 
     for i, clause in enumerate(retrieved_clauses, 1):
@@ -323,29 +325,29 @@ def run_compliance_reasoning(
 
 # ── Follow-up Reasoning ───────────────────────────────────────────────────────
  
-FOLLOWUP_SYSTEM_PROMPT = """You are a FINRA compliance analyst. You have already \
-analyzed a compliance situation and provided a detailed answer. The user now has \
-a follow-up question.
+# FOLLOWUP_SYSTEM_PROMPT = """You are a FINRA compliance analyst. You have already \
+# analyzed a compliance situation and provided a detailed answer. The user now has \
+# a follow-up question.
  
-RULES
-=====
-1. Answer ONLY based on the retrieved clauses and your previous analysis below.
-2. Do not retrieve new information or cite rules not already in the context.
-3. Keep your answer concise and directly responsive to the question.
-4. If the question cannot be answered from the available context, say so clearly.
-5. Do not repeat your full previous analysis — reference it where relevant.
+# RULES
+# =====
+# 1. Answer ONLY based on the retrieved clauses and your previous analysis below.
+# 2. Do not retrieve new information or cite rules not already in the context.
+# 3. Keep your answer concise and directly responsive to the question.
+# 4. If the question cannot be answered from the available context, say so clearly.
+# 5. Do not repeat your full previous analysis — reference it where relevant.
  
-ORIGINAL SITUATION
-==================
-{situation_summary}
+# ORIGINAL SITUATION
+# ==================
+# {situation_summary}
  
-RETRIEVED CLAUSES
-=================
-{formatted_clauses}
+# RETRIEVED CLAUSES
+# =================
+# {formatted_clauses}
  
-YOUR PREVIOUS COMPLIANCE ANALYSIS
-==================================
-{initial_reasoning}"""
+# YOUR PREVIOUS COMPLIANCE ANALYSIS
+# ==================================
+# {initial_reasoning}"""
  
  
 def run_followup_reasoning(
@@ -383,7 +385,7 @@ def run_followup_reasoning(
     # Truncate clauses at a shorter limit than the main reasoning prompt
     # because the follow-up prompt also includes the initial analysis,
     # making the context budget tighter.
-    MAX_CLAUSE_CHARS = 400
+    # MAX_CLAUSE_CHARS = 400
  
     formatted_clauses_parts = []
     for i, clause in enumerate(retrieved_clauses, 1):
@@ -396,7 +398,7 @@ def run_followup_reasoning(
  
     # Truncate initial reasoning to prevent the context budget from being
     # dominated by the previous answer on long reasoning outputs.
-    MAX_REASONING_CHARS = 1200
+    # MAX_REASONING_CHARS = 1200
     if len(initial_reasoning_raw) > MAX_REASONING_CHARS:
         initial_reasoning_raw = initial_reasoning_raw[:MAX_REASONING_CHARS].rstrip() + "..."
  

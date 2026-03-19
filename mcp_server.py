@@ -112,12 +112,15 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
-from compliance_reasoning import COMPLIANCE_REASONING_PROMPT
-from retrieval import load_collection, retrieve_clauses as _retrieve_clauses
-from intent_pipeline import (
+from pipeline.compliance_reasoning import COMPLIANCE_REASONING_PROMPT
+from pipeline.retrieval import load_collection, retrieve_clauses as _retrieve_clauses
+from pipeline.intent_pipeline import (
     extract_structured_intent_api,
     CLARIFICATION_SYSTEM_PROMPT,
 )
+from config.prompts  import COMPLIANCE_REASONING_PROMPT, CLARIFICATION_SYSTEM_PROMPT
+from config.settings import MODEL_CONFIGS
+
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 

@@ -64,6 +64,14 @@ CONTEXT_WARN_THRESHOLD = 20
 # Hard-disable follow-up input below this percentage
 CONTEXT_HARD_LIMIT_PCT = 5
 
+# Truncate clauses at a shorter limit than the main reasoning prompt
+# because the follow-up prompt also includes the initial analysis,
+# making the context budget tighter.
+MAX_CLAUSE_CHARS = 1000
+# Truncate initial reasoning to prevent the context budget from being
+# dominated by the previous answer on long reasoning outputs.
+MAX_REASONING_CHARS = 5000
+
 # ── FINRA scraper ─────────────────────────────────────────────────────────────
 TARGET_RULES = [
     {

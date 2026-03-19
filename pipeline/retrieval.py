@@ -43,15 +43,16 @@ Usage:
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from pathlib import Path
+from config.settings import CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL, DEFAULT_TOP_K
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CHROMA_PATH      = BASE_DIR / "data/chromadb"
+# BASE_DIR = Path(__file__).resolve().parent.parent
+# CHROMA_PATH      = BASE_DIR / "data/chromadb"
 
-COLLECTION_NAME  = "finra_clauses"
-EMBEDDING_MODEL  = "all-MiniLM-L6-v2"
-DEFAULT_TOP_K    = 5
+# COLLECTION_NAME  = "finra_clauses"
+# EMBEDDING_MODEL  = "all-MiniLM-L6-v2"
+# DEFAULT_TOP_K    = 5
 
 # Fields that carry enough discriminating power to use as hard filters.
 # Fields not in this list are used only for query construction, not filtering.

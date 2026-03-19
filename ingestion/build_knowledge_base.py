@@ -34,6 +34,11 @@ Dependencies:
 import argparse
 import json
 from pathlib import Path
+from config.settings import (
+    CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL,
+    BATCH_SIZE, MODEL_CONFIGS,
+)
+
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
@@ -48,11 +53,11 @@ from parse_finra import (
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CHROMA_PATH      = BASE_DIR / "data/chromadb" # persistent storage location
-COLLECTION_NAME = "finra_clauses"       # ChromaDB collection name
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"   # lightweight, works well on CPU
-BATCH_SIZE      = 50                    # documents per ChromaDB write
+# BASE_DIR = Path(__file__).resolve().parent.parent
+# CHROMA_PATH      = BASE_DIR / "data/chromadb" # persistent storage location
+# COLLECTION_NAME = "finra_clauses"       # ChromaDB collection name
+# EMBEDDING_MODEL = "all-MiniLM-L6-v2"   # lightweight, works well on CPU
+# BATCH_SIZE      = 50                    # documents per ChromaDB write
 
 
 # ── Step 4: ChromaDB Setup ────────────────────────────────────────────────────
@@ -177,8 +182,8 @@ Examples:
     parser.add_argument(
         "--model",
         choices = ["qwen", "llama"],
-        default = "qwen",
-        help    = "Local model to use for clause normalisation  (default: qwen)",
+        default = "llama",
+        help    = "Local model to use for clause normalisation  (default: llama)",
     )
     parser.add_argument(
         "--skip-scraping",

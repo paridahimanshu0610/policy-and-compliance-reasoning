@@ -36,45 +36,51 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from config.settings import (
+    MODEL_CONFIGS, MAX_CLARIFY_QUESTIONS,
+    CONTEXT_WARN_THRESHOLD, CONTEXT_HARD_LIMIT_PCT,
+    DEFAULT_TOP_K, MAX_REASONING_CHARS, MAX_CLAUSE_CHARS,
+)
+from contextlib import asynccontextmanager
 
-from compliance_reasoning import run_compliance_reasoning, run_followup_reasoning
-from intent_pipeline import (
+from pipeline.compliance_reasoning import run_compliance_reasoning, run_followup_reasoning
+from pipeline.intent_pipeline import (
     CLARIFICATION_SYSTEM_PROMPT,
     extract_structured_intent,
     process_clarification_turn,
 )
-from retrieval import load_collection, retrieve_clauses
+from pipeline.retrieval import load_collection, retrieve_clauses
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-MODEL_CONFIGS = {
-    "qwen": {
-        "path": (
-            "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-            "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
-        ),
-        # Practical context limit — leave headroom below max_position_embeddings
-        # Qwen max_position_embeddings = 32768; use 28000 to stay safe
-        "max_context_tokens": 28000,
-        "n_ctx": 8192,
-    },
-    "llama": {
-        "path": (
-            "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-            "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
-        ),
-        # Llama max_position_embeddings = 131072; 8B quality degrades well
-        # before the hard limit — use 80000 as a conservative practical cap
-        "max_context_tokens": 80000,
-        "n_ctx": 16384,
-    },
-}
+# MODEL_CONFIGS = {
+#     "qwen": {
+#         "path": (
+#             "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#             "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
+#         ),
+#         # Practical context limit — leave headroom below max_position_embeddings
+#         # Qwen max_position_embeddings = 32768; use 28000 to stay safe
+#         "max_context_tokens": 28000,
+#         "n_ctx": 8192,
+#     },
+#     "llama": {
+#         "path": (
+#             "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#             "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
+#         ),
+#         # Llama max_position_embeddings = 131072; 8B quality degrades well
+#         # before the hard limit — use 80000 as a conservative practical cap
+#         "max_context_tokens": 80000,
+#         "n_ctx": 16384,
+#     },
+# }
 
-MAX_CLARIFY_QUESTIONS  = 10
-# Warn user when context drops below this percentage
-CONTEXT_WARN_THRESHOLD = 20
-# Hard disable follow-ups below this percentage
-CONTEXT_HARD_LIMIT_PCT = 5
+# MAX_CLARIFY_QUESTIONS  = 10
+# # Warn user when context drops below this percentage
+# CONTEXT_WARN_THRESHOLD = 20
+# # Hard disable follow-ups below this percentage
+# CONTEXT_HARD_LIMIT_PCT = 5
 
 # ── Globals (set at startup) ──────────────────────────────────────────────────
 
@@ -91,8 +97,29 @@ _executor    = ThreadPoolExecutor(max_workers=1)
 _sessions: dict[str, dict] = {}
 
 # ── FastAPI App ───────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _model, _collection, _max_ctx
+    print("\nStarting FINRA Compliance Reasoning System...")
+    print(f"  Model  : {_model_name}")
+    print(f"  Top-k  : {_top_k}")
 
-app = FastAPI(title="FINRA Compliance Reasoning System")
+    print("\nLoading model (this may take 30–60 seconds)...")
+    _model = await _run_in_executor(_load_model_sync, _model_name)
+    print("  ✓ Model loaded")
+
+    print("Loading ChromaDB collection...")
+    _collection = load_collection()
+    print(f"  ✓ Collection loaded  ({_collection.count()} clauses)")
+
+    _max_ctx = MODEL_CONFIGS[_model_name]["max_context_tokens"]
+    print(f"\n  Context budget : {_max_ctx:,} tokens")
+    print("  Ready.\n")
+
+    yield
+
+
+app = FastAPI(title="FINRA Compliance Reasoning System", lifespan=lifespan)
 
 # Serve static files (index.html) from ./static
 static_dir = Path(__file__).parent.parent / "static"
@@ -264,8 +291,8 @@ def _do_clarification_turn(session: dict, user_message: str) -> dict:
 
     system_prompt_approx = (
         _approx_tokens(situation_summary) +
-        sum(_approx_tokens(c.get("document", "")[:400]) for c in retrieved) +
-        _approx_tokens(answer.get("raw", "")[:1200])
+        sum(_approx_tokens(c.get("document", "")[:MAX_CLAUSE_CHARS]) for c in retrieved) +
+        _approx_tokens(answer.get("raw", "")[:MAX_REASONING_CHARS])
     )
     session["tokens_used_followup"] = system_prompt_approx
     session["phase"] = "followup"
@@ -428,26 +455,6 @@ def _load_model_sync(model_name: str):
     )
 
 
-@app.on_event("startup")
-async def startup_event():
-    global _model, _collection, _max_ctx
-    print("\nStarting FINRA Compliance Reasoning System...")
-    print(f"  Model  : {_model_name}")
-    print(f"  Top-k  : {_top_k}")
-
-    print("\nLoading model (this may take 30–60 seconds)...")
-    _model = await _run_in_executor(_load_model_sync, _model_name)
-    print("  ✓ Model loaded")
-
-    print("Loading ChromaDB collection...")
-    _collection = load_collection()
-    print(f"  ✓ Collection loaded  ({_collection.count()} clauses)")
-
-    _max_ctx = MODEL_CONFIGS[_model_name]["max_context_tokens"]
-    print(f"\n  Context budget : {_max_ctx:,} tokens")
-    print("  Ready.\n")
-
-
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -465,7 +472,7 @@ if __name__ == "__main__":
     _top_k      = args.top_k
 
     uvicorn.run(
-        "server:app",
+        "web.server:app",
         host    = args.host,
         port    = args.port,
         reload  = False,

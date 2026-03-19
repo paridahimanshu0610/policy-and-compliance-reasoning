@@ -20,47 +20,49 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 from llama_cpp import Llama
 import uuid
+from config.settings import TARGET_RULES, SCRAPER_HEADERS, PARSED_CHECKPOINT, NORMALIZED_CHECKPOINT, MODEL_CONFIGS
+from config.prompts  import CLAUSE_NORMALISATION_PROMPT
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-TARGET_RULES = [
-    {
-        "rule_id": "3110",
-        "name": "Supervision",
-        "category": "supervision",
-        "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3110",
-    },
-    # {
-    #     "rule_id": "3120",
-    #     "name": "Supervisory Control System",
-    #     "category": "supervision",
-    #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3120",
-    # },
-    # {
-    #     "rule_id": "3130",
-    #     "name": "Annual Certification of Compliance and Supervisory Processes",
-    #     "category": "supervision",
-    #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3130",
-    # },
-    # {
-    #     "rule_id": "4511",
-    #     "name": "General Requirements for Books and Records",
-    #     "category": "recordkeeping",
-    #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4511",
-    # },
-]
+# TARGET_RULES = [
+#     {
+#         "rule_id": "3110",
+#         "name": "Supervision",
+#         "category": "supervision",
+#         "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3110",
+#     },
+#     # {
+#     #     "rule_id": "3120",
+#     #     "name": "Supervisory Control System",
+#     #     "category": "supervision",
+#     #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3120",
+#     # },
+#     # {
+#     #     "rule_id": "3130",
+#     #     "name": "Annual Certification of Compliance and Supervisory Processes",
+#     #     "category": "supervision",
+#     #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3130",
+#     # },
+#     # {
+#     #     "rule_id": "4511",
+#     #     "name": "General Requirements for Books and Records",
+#     #     "category": "recordkeeping",
+#     #     "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4511",
+#     # },
+# ]
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
+# SCRAPER_HEADERS = {
+#     "User-Agent": (
+#         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+#         "AppleWebKit/537.36 (KHTML, like Gecko) "
+#         "Chrome/120.0.0.0 Safari/537.36"
+#     ),
+#     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+#     "Accept-Language": "en-US,en;q=0.5",
+# }
 
-OUTPUT_FILE = Path("knowledge_base.json")
+# OUTPUT_FILE = Path("knowledge_base.json")
 
 # Hidden marker to preserve strong/bold tag boundaries post-HTML extraction
 HEADING_MARKER = "\ue000" 
@@ -70,7 +72,7 @@ HEADING_MARKER = "\ue000"
 def scrape_rule_page(url: str) -> str:
     print(f"  Fetching: {url}")
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        response = requests.get(url, headers=SCRAPER_HEADERS, timeout=15)
         response.raise_for_status()
     except requests.RequestException as e:
         print(f"  ✗ Request failed: {e}")
@@ -514,414 +516,414 @@ def build_context_bundle(clause_ref: str, all_clauses: dict) -> dict:
 
 # ── Prompt Template ───────────────────────────────────────────────────────────
 
-CLAUSE_NORMALISATION_PROMPT = """TASK
-====
-You are a regulatory data analyst. Your job is to read a raw FINRA rule clause
-and populate a structured JSON object by following the schema and instructions
-below exactly.
+# CLAUSE_NORMALISATION_PROMPT = """TASK
+# ====
+# You are a regulatory data analyst. Your job is to read a raw FINRA rule clause
+# and populate a structured JSON object by following the schema and instructions
+# below exactly.
 
-CRITICAL RULES — READ BEFORE YOU BEGIN
-=======================================
-1. Return ONLY a valid JSON object. No explanations, no markdown fences,
-   no commentary before or after the JSON.
-2. Never invent information. If a field cannot be determined from the clause
-   text, use the default value shown in the schema (null, false, or []).
-3. Every string value you fill in MUST come from the allowed values listed
-   in the comments for that field. Do not use values outside those lists.
-4. Fill in every field. Do not omit any field from the output.
-5. "activity_type" is the MOST IMPORTANT field. Read the clause carefully
-   and choose the single best match from the allowed values.
-6. If a list field has no applicable values, return an empty array [].
-7. If a boolean field cannot be determined, return false as the default.
-8. If a string or null field cannot be determined, return null.
+# CRITICAL RULES — READ BEFORE YOU BEGIN
+# =======================================
+# 1. Return ONLY a valid JSON object. No explanations, no markdown fences,
+#    no commentary before or after the JSON.
+# 2. Never invent information. If a field cannot be determined from the clause
+#    text, use the default value shown in the schema (null, false, or []).
+# 3. Every string value you fill in MUST come from the allowed values listed
+#    in the comments for that field. Do not use values outside those lists.
+# 4. Fill in every field. Do not omit any field from the output.
+# 5. "activity_type" is the MOST IMPORTANT field. Read the clause carefully
+#    and choose the single best match from the allowed values.
+# 6. If a list field has no applicable values, return an empty array [].
+# 7. If a boolean field cannot be determined, return false as the default.
+# 8. If a string or null field cannot be determined, return null.
 
-INPUTS YOU WILL RECEIVE
-=======================
-- RULE ID         : The FINRA rule number (e.g. 3110)
-- RULE NAME       : The name of the rule (e.g. Supervision)
-- PARENT REF      : The parent clause reference, or null if top-level
-- CLAUSE REF      : The specific clause identifier (e.g. FINRA-3110(c)(1)(A))
-- TARGET CLAUSE   : The specific clause you must structure. Use exact or
-                    near-exact language from this text for keywords.
-- FULL RULE TEXT  : The complete rule text provided for context.
-                    Read this alongside the TARGET CLAUSE to fully
-                    understand the meaning and intent of what you
-                    are structuring.
+# INPUTS YOU WILL RECEIVE
+# =======================
+# - RULE ID         : The FINRA rule number (e.g. 3110)
+# - RULE NAME       : The name of the rule (e.g. Supervision)
+# - PARENT REF      : The parent clause reference, or null if top-level
+# - CLAUSE REF      : The specific clause identifier (e.g. FINRA-3110(c)(1)(A))
+# - TARGET CLAUSE   : The specific clause you must structure. Use exact or
+#                     near-exact language from this text for keywords.
+# - FULL RULE TEXT  : The complete rule text provided for context.
+#                     Read this alongside the TARGET CLAUSE to fully
+#                     understand the meaning and intent of what you
+#                     are structuring.
 
-SCHEMA TO POPULATE
-==================
-{{
-    "category": "",
-    // Top-level regulatory domain. Choose exactly ONE value.
-    //
-    // ALLOWED VALUES AND WHEN TO USE THEM:
-    //
-    // "supervision"               → clause is about supervisory systems,
-    //                               supervisory control, or annual
-    //                               certification (rules 3110, 3120, 3130)
-    //
-    // "customer_communication"    → clause governs how members communicate
-    //                               with or handle communications from
-    //                               customers (rules 3150, 3160, 3170)
-    //
-    // "associated_person_conduct" → clause restricts or governs what a
-    //                               registered or associated person may do
-    //                               (rules 3210, 3220, 3240, 3241,
-    //                                3270, 3280)
-    //
-    // "telemarketing"             → clause is about telemarketing rules
-    //                               (rule 3230)
-    //
-    // "account_management"        → clause governs account designation or
-    //                               discretionary trading authority
-    //                               (rules 3250, 3260)
-    //
-    // "AML"                       → clause is about anti-money laundering
-    //                               compliance (rule 3310)
-    //
-    // "financial_condition"       → clause governs capital requirements,
-    //                               financial distress, audits, or asset
-    //                               verification (rules 4110–4160)
-    //
-    // "margin"                    → clause governs margin calculations,
-    //                               margin accounts, or margin records
-    //                               (rules 4210–4240)
-    //
-    // "books_and_records"         → clause governs recordkeeping obligations
-    //                               (rules 4570–4590)
-    //
-    // "ATS_reporting"             → clause governs market activity or
-    //                               short interest reporting (rule 4560)
-    //
-    // HOW TO DECIDE: Use the rule ID to narrow down the domain.
-    // Then confirm by checking the activity_type you identified.
+# SCHEMA TO POPULATE
+# ==================
+# {{
+#     "category": "",
+#     // Top-level regulatory domain. Choose exactly ONE value.
+#     //
+#     // ALLOWED VALUES AND WHEN TO USE THEM:
+#     //
+#     // "supervision"               → clause is about supervisory systems,
+#     //                               supervisory control, or annual
+#     //                               certification (rules 3110, 3120, 3130)
+#     //
+#     // "customer_communication"    → clause governs how members communicate
+#     //                               with or handle communications from
+#     //                               customers (rules 3150, 3160, 3170)
+#     //
+#     // "associated_person_conduct" → clause restricts or governs what a
+#     //                               registered or associated person may do
+#     //                               (rules 3210, 3220, 3240, 3241,
+#     //                                3270, 3280)
+#     //
+#     // "telemarketing"             → clause is about telemarketing rules
+#     //                               (rule 3230)
+#     //
+#     // "account_management"        → clause governs account designation or
+#     //                               discretionary trading authority
+#     //                               (rules 3250, 3260)
+#     //
+#     // "AML"                       → clause is about anti-money laundering
+#     //                               compliance (rule 3310)
+#     //
+#     // "financial_condition"       → clause governs capital requirements,
+#     //                               financial distress, audits, or asset
+#     //                               verification (rules 4110–4160)
+#     //
+#     // "margin"                    → clause governs margin calculations,
+#     //                               margin accounts, or margin records
+#     //                               (rules 4210–4240)
+#     //
+#     // "books_and_records"         → clause governs recordkeeping obligations
+#     //                               (rules 4570–4590)
+#     //
+#     // "ATS_reporting"             → clause governs market activity or
+#     //                               short interest reporting (rule 4560)
+#     //
+#     // HOW TO DECIDE: Use the rule ID to narrow down the domain.
+#     // Then confirm by checking the activity_type you identified.
 
-    "obligated_actor": "",
-    // The party who must comply with this clause.
-    // Choose exactly ONE value from this list:
-    //
-    // "member"
-    // "associated_person"
-    // "registered_person"
-    // "registered_representative"
-    // "registered_principal"
-    // "supervisory_personnel"
-    // "CEO"
-    // "CFO"
-    // "financial_operations_principal"
-    // "other"
-    //
-    // HOW TO DECIDE: Find the party who is explicitly required
-    // to DO something under the governing obligation of this
-    // clause. Look for the subject of an obligation sentence
-    // (e.g. "each member shall", "the registered representative
-    // must"). IMPORTANT — Do not confuse a role or entity that
-    // appears in a descriptive or qualifying phrase with the
-    // obligated actor. For example, "the person associated with
-    // the member" in the phrase "over whose account the person
-    // associated with the member has control" is describing a
-    // relationship, not bearing an obligation. The obligated
-    // actor must be the party who is explicitly required to DO
-    // something, not a party mentioned in passing in a
-    // descriptive context.
-    // Always try to be as specific as possible. If the clause
-    // names a specific role (e.g. member, registered
-    // representative, supervisory personnel), use that.
-    // Use "other" only if the obligated party is clearly not
-    // one of the listed roles.
+#     "obligated_actor": "",
+#     // The party who must comply with this clause.
+#     // Choose exactly ONE value from this list:
+#     //
+#     // "member"
+#     // "associated_person"
+#     // "registered_person"
+#     // "registered_representative"
+#     // "registered_principal"
+#     // "supervisory_personnel"
+#     // "CEO"
+#     // "CFO"
+#     // "financial_operations_principal"
+#     // "other"
+#     //
+#     // HOW TO DECIDE: Find the party who is explicitly required
+#     // to DO something under the governing obligation of this
+#     // clause. Look for the subject of an obligation sentence
+#     // (e.g. "each member shall", "the registered representative
+#     // must"). IMPORTANT — Do not confuse a role or entity that
+#     // appears in a descriptive or qualifying phrase with the
+#     // obligated actor. For example, "the person associated with
+#     // the member" in the phrase "over whose account the person
+#     // associated with the member has control" is describing a
+#     // relationship, not bearing an obligation. The obligated
+#     // actor must be the party who is explicitly required to DO
+#     // something, not a party mentioned in passing in a
+#     // descriptive context.
+#     // Always try to be as specific as possible. If the clause
+#     // names a specific role (e.g. member, registered
+#     // representative, supervisory personnel), use that.
+#     // Use "other" only if the obligated party is clearly not
+#     // one of the listed roles.
 
-    "regulated_subject": "",
-    // The entity or object that the obligation is about.
-    // Choose exactly ONE value from this list:
-    //
-    // "associated_person"
-    // "registered_person"
-    // "customer"
-    // "customer_account"
-    // "member_firm"
-    // "supervisory_personnel"
-    // "OSJ"
-    // "branch_office"
-    // "non_branch_location"
-    // "written_procedures"
-    // "communication"
-    // "transaction"
-    // "capital_position"
-    // "margin_account"
-    // "security_position"
-    // "business_clock"
-    // "books_and_records"
-    // "short_position"
-    // "government_securities"
-    // "swap_position"
-    // "other"
-    //
-    // HOW TO DECIDE: Ask yourself — what is being supervised,
-    // restricted, reviewed, or measured by the governing
-    // obligation this clause belongs to? That is the
-    // regulated_subject.
-    // Always try to be as specific as possible. If the clause
-    // names a specific entity or object (e.g. customer account,
-    // supervisory personnel, OSJ), use that.
-    // Use "other" only if the regulated subject is clearly not
-    // one of the listed entities or objects.
+#     "regulated_subject": "",
+#     // The entity or object that the obligation is about.
+#     // Choose exactly ONE value from this list:
+#     //
+#     // "associated_person"
+#     // "registered_person"
+#     // "customer"
+#     // "customer_account"
+#     // "member_firm"
+#     // "supervisory_personnel"
+#     // "OSJ"
+#     // "branch_office"
+#     // "non_branch_location"
+#     // "written_procedures"
+#     // "communication"
+#     // "transaction"
+#     // "capital_position"
+#     // "margin_account"
+#     // "security_position"
+#     // "business_clock"
+#     // "books_and_records"
+#     // "short_position"
+#     // "government_securities"
+#     // "swap_position"
+#     // "other"
+#     //
+#     // HOW TO DECIDE: Ask yourself — what is being supervised,
+#     // restricted, reviewed, or measured by the governing
+#     // obligation this clause belongs to? That is the
+#     // regulated_subject.
+#     // Always try to be as specific as possible. If the clause
+#     // names a specific entity or object (e.g. customer account,
+#     // supervisory personnel, OSJ), use that.
+#     // Use "other" only if the regulated subject is clearly not
+#     // one of the listed entities or objects.
 
-    "activity_type": "",
-    // The regulated activity this clause governs.
-    // THIS IS THE MOST IMPORTANT FIELD.
-    // Choose exactly ONE value from this list:
-    //
-    // 3000 series:
-    // "supervision", "inspection",
-    // "review", "certification",
-    // "registration_verification", "correspondence_review",
-    // "transaction_review", "complaint_handling",
-    // "designation", "tape_recording",
-    // "mail_holding", "outside_business_activity",
-    // "private_securities_transaction", "borrowing_lending",
-    // "telemarketing", "AML_monitoring",
-    // "account_opening", "discretionary_trading",
-    // "beneficiary_designation", "employee_compensation",
-    // "networking_arrangement", "outside_account_disclosure",
-    //
-    // 4000 series:
-    // "capital_compliance", "restricted_firm_reporting",
-    // "regulatory_notification", "business_curtailment",
-    // "audit", "guarantee_flow_through",
-    // "asset_verification", "margin_calculation",
-    // "margin_recordkeeping", "margin_extension_request",
-    // "swap_margin", "short_interest_reporting",
-    // "books_and_records", "clock_synchronization",
-    //
-    // HOW TO DECIDE: Ask — what is the member or person
-    // actually required to DO under the governing obligation
-    // this clause belongs to? Match that action to the closest
-    // value in the list above. IMPORTANT — If the clause is
-    // definitional, a sub-element, or a list item, do not
-    // attempt to derive an activity from verbs used in a
-    // descriptive or scoping context (e.g. "has control",
-    // "shall include", "is held by" are structural phrases,
-    // not regulated activities). Always match to the activity
-    // of the governing obligation, not to incidental verbs
-    // within the clause text.
+#     "activity_type": "",
+#     // The regulated activity this clause governs.
+#     // THIS IS THE MOST IMPORTANT FIELD.
+#     // Choose exactly ONE value from this list:
+#     //
+#     // 3000 series:
+#     // "supervision", "inspection",
+#     // "review", "certification",
+#     // "registration_verification", "correspondence_review",
+#     // "transaction_review", "complaint_handling",
+#     // "designation", "tape_recording",
+#     // "mail_holding", "outside_business_activity",
+#     // "private_securities_transaction", "borrowing_lending",
+#     // "telemarketing", "AML_monitoring",
+#     // "account_opening", "discretionary_trading",
+#     // "beneficiary_designation", "employee_compensation",
+#     // "networking_arrangement", "outside_account_disclosure",
+#     //
+#     // 4000 series:
+#     // "capital_compliance", "restricted_firm_reporting",
+#     // "regulatory_notification", "business_curtailment",
+#     // "audit", "guarantee_flow_through",
+#     // "asset_verification", "margin_calculation",
+#     // "margin_recordkeeping", "margin_extension_request",
+#     // "swap_margin", "short_interest_reporting",
+#     // "books_and_records", "clock_synchronization",
+#     //
+#     // HOW TO DECIDE: Ask — what is the member or person
+#     // actually required to DO under the governing obligation
+#     // this clause belongs to? Match that action to the closest
+#     // value in the list above. IMPORTANT — If the clause is
+#     // definitional, a sub-element, or a list item, do not
+#     // attempt to derive an activity from verbs used in a
+#     // descriptive or scoping context (e.g. "has control",
+#     // "shall include", "is held by" are structural phrases,
+#     // not regulated activities). Always match to the activity
+#     // of the governing obligation, not to incidental verbs
+#     // within the clause text.
 
-    "applies_to_firm_type": [],
-    // List all firm types this clause applies to.
-    // Choose one or more values from this list:
-    //
-    // "broker_dealer"           → applies to all broker-dealers
-    // "carrying_firm"           → holds customer assets
-    // "introducing_firm"        → introduces accounts to carrying firms
-    // "section_15C_member"      → government securities dealers
-    // "restricted_firm"         → firms under 4111 obligations
-    // "ATS_operator"            → operates alternative trading system
-    // "tape_recording_firm"     → firms with tape recording history
-    // "investment_banking_firm" → conducts investment banking services
-    // "financial_institution"   → networking partner under 3160
-    //
-    // HOW TO DECIDE: Identify which firm type the governing
-    // obligation applies to. If the clause applies to all
-    // members generally, use ["broker_dealer"].
-    // If uncertain, use ["broker_dealer"].
+#     "applies_to_firm_type": [],
+#     // List all firm types this clause applies to.
+#     // Choose one or more values from this list:
+#     //
+#     // "broker_dealer"           → applies to all broker-dealers
+#     // "carrying_firm"           → holds customer assets
+#     // "introducing_firm"        → introduces accounts to carrying firms
+#     // "section_15C_member"      → government securities dealers
+#     // "restricted_firm"         → firms under 4111 obligations
+#     // "ATS_operator"            → operates alternative trading system
+#     // "tape_recording_firm"     → firms with tape recording history
+#     // "investment_banking_firm" → conducts investment banking services
+#     // "financial_institution"   → networking partner under 3160
+#     //
+#     // HOW TO DECIDE: Identify which firm type the governing
+#     // obligation applies to. If the clause applies to all
+#     // members generally, use ["broker_dealer"].
+#     // If uncertain, use ["broker_dealer"].
 
-    "involves_customer": false,
-    // Set to true if the clause directly concerns:
-    // - customer accounts or assets
-    // - interactions between firm employees and customers
-    // - protection of customer interests
-    // - any mention of "public customers", "retail customers",
-    //   "clients", or any direct reference to customers of
-    //   the member firm
-    // Otherwise set to false.
+#     "involves_customer": false,
+#     // Set to true if the clause directly concerns:
+#     // - customer accounts or assets
+#     // - interactions between firm employees and customers
+#     // - protection of customer interests
+#     // - any mention of "public customers", "retail customers",
+#     //   "clients", or any direct reference to customers of
+#     //   the member firm
+#     // Otherwise set to false.
 
-    "involves_third_party": false,
-    // Set to true if the clause involves an entity
-    // outside the member firm, such as:
-    // - another broker-dealer or financial institution
-    // - a bank or counterparty
-    // - an outside employer
-    // - a registered national securities exchange
-    // - a clearing firm or self-regulatory organization
-    // - any external venue, platform, or institution
-    //   not itself part of the member firm
-    // SIMPLE CHECK: If the clause names or references ANY
-    // specific organization, institution, venue, or entity
-    // other than the member firm or its associated persons,
-    // set this to true. The presence of any named external
-    // entity in the clause is sufficient.
-    // Otherwise set to false.
+#     "involves_third_party": false,
+#     // Set to true if the clause involves an entity
+#     // outside the member firm, such as:
+#     // - another broker-dealer or financial institution
+#     // - a bank or counterparty
+#     // - an outside employer
+#     // - a registered national securities exchange
+#     // - a clearing firm or self-regulatory organization
+#     // - any external venue, platform, or institution
+#     //   not itself part of the member firm
+#     // SIMPLE CHECK: If the clause names or references ANY
+#     // specific organization, institution, venue, or entity
+#     // other than the member firm or its associated persons,
+#     // set this to true. The presence of any named external
+#     // entity in the clause is sufficient.
+#     // Otherwise set to false.
 
-    "has_financial_threshold": false,
-    // Set to true if the clause's applicability or
-    // requirements depend on a financial metric such as:
-    // - capital ratios or net capital levels
-    // - gross revenue thresholds (e.g. $200M)
-    // - margin percentages or account values
-    // Otherwise set to false.
+#     "has_financial_threshold": false,
+#     // Set to true if the clause's applicability or
+#     // requirements depend on a financial metric such as:
+#     // - capital ratios or net capital levels
+#     // - gross revenue thresholds (e.g. $200M)
+#     // - margin percentages or account values
+#     // Otherwise set to false.
 
-    "documentation_required": false,
-    // Set to true if the clause explicitly requires:
-    // - a written record, report, or filing
-    // - documentation to be retained or submitted
-    // Look for phrases like "evidenced in writing",
-    // "written report", "kept on file", "must retain".
-    // Otherwise set to false.
+#     "documentation_required": false,
+#     // Set to true if the clause explicitly requires:
+#     // - a written record, report, or filing
+#     // - documentation to be retained or submitted
+#     // Look for phrases like "evidenced in writing",
+#     // "written report", "kept on file", "must retain".
+#     // Otherwise set to false.
 
-    "frequency": null,
-    // How often the obligation must be performed.
-    // Choose exactly ONE value or null:
-    //
-    // "ongoing"       → continuous obligation with no fixed cycle;
-    //                   look for phrases like "at all times",
-    //                   "continuously", "shall maintain", "must
-    //                   always ensure", or any obligation that
-    //                   implies a permanent, uninterrupted duty
-    //                   with no specific time interval stated
-    // "annual"        → once per calendar year
-    // "triennial"     → once every three years
-    // "quarterly"     → once per quarter
-    // "monthly"       → once per month
-    // "daily"         → every business day
-    // "semi_annual"   → twice per year
-    // "upon_trigger"  → only when a specific event occurs;
-    //                   look for conditional language such as
-    //                   "if", "when", "upon", "in the event that",
-    //                   "where a member determines", or any
-    //                   obligation that activates only after
-    //                   a specific condition is met
-    // "within_N_days" → within a specific number of days
-    // "one_time"      → a setup or establishment obligation
-    //                   required only once; look for phrases like
-    //                   "shall establish", "must adopt", "shall
-    //                   develop", or any obligation that is
-    //                   fulfilled permanently once completed
-    //                   and does not recur
-    // "other"         → a frequency is clearly stated in the
-    //                   clause but does not match any value above;
-    //                   use this sparingly and only when the
-    //                   clause explicitly states a time constraint
-    //                   that cannot be mapped to any other value
-    // null            → frequency is not stated in the clause and
-    //                   cannot be safely inferred; when in doubt,
-    //                   prefer null over an uncertain inference
-    //
-    // HOW TO DECIDE:
-    // 1. Look for an explicit time phrase that answers the
-    //    question "how often must this obligation be performed?"
-    //    If found, map it directly to the matching value.
-    // 2. IMPORTANT — A valid frequency signal must express how
-    //    often the compliance obligation recurs. Words like
-    //    "regularly", "routinely", or "continuously" appearing
-    //    in a definitional or scoping context (e.g. describing
-    //    what qualifies as a branch office) are NOT frequency
-    //    signals for the compliance obligation.
-    // 3. CRITICAL: Many clauses use obligation language — words
-    //    like "shall", "must", "is required to", "is prohibited
-    //    from", and similar terms — to express that a duty exists,
-    //    not to express how often it must be performed. Do NOT
-    //    treat obligation language as evidence of frequency.
-    //    Always look for a separate, explicit signal that answers
-    //    the question "how often?" before assigning any value.
-    // 4. If a frequency is clearly stated but does not match
-    //    any known value, use "other".
-    // 5. When in doubt, use null. null is the safe default.
+#     "frequency": null,
+#     // How often the obligation must be performed.
+#     // Choose exactly ONE value or null:
+#     //
+#     // "ongoing"       → continuous obligation with no fixed cycle;
+#     //                   look for phrases like "at all times",
+#     //                   "continuously", "shall maintain", "must
+#     //                   always ensure", or any obligation that
+#     //                   implies a permanent, uninterrupted duty
+#     //                   with no specific time interval stated
+#     // "annual"        → once per calendar year
+#     // "triennial"     → once every three years
+#     // "quarterly"     → once per quarter
+#     // "monthly"       → once per month
+#     // "daily"         → every business day
+#     // "semi_annual"   → twice per year
+#     // "upon_trigger"  → only when a specific event occurs;
+#     //                   look for conditional language such as
+#     //                   "if", "when", "upon", "in the event that",
+#     //                   "where a member determines", or any
+#     //                   obligation that activates only after
+#     //                   a specific condition is met
+#     // "within_N_days" → within a specific number of days
+#     // "one_time"      → a setup or establishment obligation
+#     //                   required only once; look for phrases like
+#     //                   "shall establish", "must adopt", "shall
+#     //                   develop", or any obligation that is
+#     //                   fulfilled permanently once completed
+#     //                   and does not recur
+#     // "other"         → a frequency is clearly stated in the
+#     //                   clause but does not match any value above;
+#     //                   use this sparingly and only when the
+#     //                   clause explicitly states a time constraint
+#     //                   that cannot be mapped to any other value
+#     // null            → frequency is not stated in the clause and
+#     //                   cannot be safely inferred; when in doubt,
+#     //                   prefer null over an uncertain inference
+#     //
+#     // HOW TO DECIDE:
+#     // 1. Look for an explicit time phrase that answers the
+#     //    question "how often must this obligation be performed?"
+#     //    If found, map it directly to the matching value.
+#     // 2. IMPORTANT — A valid frequency signal must express how
+#     //    often the compliance obligation recurs. Words like
+#     //    "regularly", "routinely", or "continuously" appearing
+#     //    in a definitional or scoping context (e.g. describing
+#     //    what qualifies as a branch office) are NOT frequency
+#     //    signals for the compliance obligation.
+#     // 3. CRITICAL: Many clauses use obligation language — words
+#     //    like "shall", "must", "is required to", "is prohibited
+#     //    from", and similar terms — to express that a duty exists,
+#     //    not to express how often it must be performed. Do NOT
+#     //    treat obligation language as evidence of frequency.
+#     //    Always look for a separate, explicit signal that answers
+#     //    the question "how often?" before assigning any value.
+#     // 4. If a frequency is clearly stated but does not match
+#     //    any known value, use "other".
+#     // 5. When in doubt, use null. null is the safe default.
 
-    "reporting_recipient": null,
-    // If the clause requires submitting a report or filing,
-    // identify who receives it. Choose ONE value or null:
-    //
-    // null                       → no reporting required
-    // "FINRA"                    → report goes to FINRA
-    // "SEC"                      → report goes to the SEC
-    // "senior_management"        → report goes to firm leadership
-    // "customer"                 → notification goes to customer
-    // "self_regulatory_organization" → report goes to a self-regulatory organization
-    // "other"                     → report goes to a recipient not listed above
-    //
-    // HOW TO DECIDE: Identify whether the governing obligation
-    // requires submitting a report or filing, and if so, who
-    // receives it. If no reporting obligation is stated, use
-    // null. If a reporting obligation exists but no recipient
-    // is named, use "other".
+#     "reporting_recipient": null,
+#     // If the clause requires submitting a report or filing,
+#     // identify who receives it. Choose ONE value or null:
+#     //
+#     // null                       → no reporting required
+#     // "FINRA"                    → report goes to FINRA
+#     // "SEC"                      → report goes to the SEC
+#     // "senior_management"        → report goes to firm leadership
+#     // "customer"                 → notification goes to customer
+#     // "self_regulatory_organization" → report goes to a self-regulatory organization
+#     // "other"                     → report goes to a recipient not listed above
+#     //
+#     // HOW TO DECIDE: Identify whether the governing obligation
+#     // requires submitting a report or filing, and if so, who
+#     // receives it. If no reporting obligation is stated, use
+#     // null. If a reporting obligation exists but no recipient
+#     // is named, use "other".
 
-    "subject_matter": [],
-    // List 3 to 6 topic tags that describe what this clause
-    // is about. Use short phrases in lowercase with underscores.
-    // Examples: "annual_inspection", "OSJ", "written_report",
-    // "customer_account", "margin_calculation", "AML_program".
-    // These are used for semantic search, so choose tags that
-    // a compliance professional might type when searching.
+#     "subject_matter": [],
+#     // List 3 to 6 topic tags that describe what this clause
+#     // is about. Use short phrases in lowercase with underscores.
+#     // Examples: "annual_inspection", "OSJ", "written_report",
+#     // "customer_account", "margin_calculation", "AML_program".
+#     // These are used for semantic search, so choose tags that
+#     // a compliance professional might type when searching.
 
-    "keywords": []
-    // List 4 to 8 important phrases taken directly from the
-    // TARGET CLAUSE text. Use exact or near-exact language
-    // from the clause. Examples: "inspect at least annually",
-    // "calendar-year basis", "written report", "kept on file".
-}}
+#     "keywords": []
+#     // List 4 to 8 important phrases taken directly from the
+#     // TARGET CLAUSE text. Use exact or near-exact language
+#     // from the clause. Examples: "inspect at least annually",
+#     // "calendar-year basis", "written report", "kept on file".
+# }}
 
-STEP-BY-STEP INSTRUCTIONS
-==========================
-Follow these steps in order before writing any output.
+# STEP-BY-STEP INSTRUCTIONS
+# ==========================
+# Follow these steps in order before writing any output.
 
-STEP 1 — Read both the TARGET CLAUSE and the FULL RULE TEXT
-          together to fully understand the governing obligation,
-          its scope, and the role the target clause plays within
-          it. Keep this understanding in mind throughout every
-          subsequent step.
+# STEP 1 — Read both the TARGET CLAUSE and the FULL RULE TEXT
+#           together to fully understand the governing obligation,
+#           its scope, and the role the target clause plays within
+#           it. Keep this understanding in mind throughout every
+#           subsequent step.
 
-STEP 2 — Identify the obligated_actor by finding the party who
-          is explicitly required to perform the governing
-          obligation. Be careful not to confuse a role or entity
-          mentioned in a descriptive or qualifying phrase with
-          the obligated actor — only the party explicitly
-          required to DO something qualifies.
+# STEP 2 — Identify the obligated_actor by finding the party who
+#           is explicitly required to perform the governing
+#           obligation. Be careful not to confuse a role or entity
+#           mentioned in a descriptive or qualifying phrase with
+#           the obligated actor — only the party explicitly
+#           required to DO something qualifies.
 
-STEP 3 — Identify the activity_type by asking: what is the actor
-          actually required to DO under the governing obligation?
-          If the target clause is definitional or a sub-element,
-          do not derive the activity from structural or
-          descriptive verbs within it — match to the activity of
-          the governing obligation instead.
+# STEP 3 — Identify the activity_type by asking: what is the actor
+#           actually required to DO under the governing obligation?
+#           If the target clause is definitional or a sub-element,
+#           do not derive the activity from structural or
+#           descriptive verbs within it — match to the activity of
+#           the governing obligation instead.
 
-STEP 4 — Identify the regulated_subject by asking: what is being
-          acted upon, supervised, or measured by the governing
-          obligation this clause belongs to?
+# STEP 4 — Identify the regulated_subject by asking: what is being
+#           acted upon, supervised, or measured by the governing
+#           obligation this clause belongs to?
 
-STEP 5 — Select the category based on the rule ID and the
-          activity identified in STEP 3.
+# STEP 5 — Select the category based on the rule ID and the
+#           activity identified in STEP 3.
 
-STEP 6 — Set the boolean fields (involves_customer,
-          involves_third_party, has_financial_threshold,
-          documentation_required) by applying the criteria
-          described in each field's instructions.
+# STEP 6 — Set the boolean fields (involves_customer,
+#           involves_third_party, has_financial_threshold,
+#           documentation_required) by applying the criteria
+#           described in each field's instructions.
 
-STEP 7 — Fill in frequency and reporting_recipient by looking
-          for explicit time phrases and reporting targets.
-          For frequency: the signal must explicitly answer "how
-          often must this obligation be performed?" — do not
-          treat definitional language or obligation language as
-          frequency signals. When in doubt, use null.
-          For reporting_recipient: identify whether the governing
-          obligation requires a report or filing and who receives
-          it. If none, use null.
+# STEP 7 — Fill in frequency and reporting_recipient by looking
+#           for explicit time phrases and reporting targets.
+#           For frequency: the signal must explicitly answer "how
+#           often must this obligation be performed?" — do not
+#           treat definitional language or obligation language as
+#           frequency signals. When in doubt, use null.
+#           For reporting_recipient: identify whether the governing
+#           obligation requires a report or filing and who receives
+#           it. If none, use null.
 
-STEP 8 — Write subject_matter tags and keywords last, after all
-          other fields are complete. Keywords must use exact or
-          near-exact language from the TARGET CLAUSE text.
+# STEP 8 — Write subject_matter tags and keywords last, after all
+#           other fields are complete. Keywords must use exact or
+#           near-exact language from the TARGET CLAUSE text.
 
-STEP 9 — Review your output. Confirm every string value appears
-          in its allowed values list. Confirm no fields are missing.
+# STEP 9 — Review your output. Confirm every string value appears
+#           in its allowed values list. Confirm no fields are missing.
 
-STEP 10 — Output the final JSON object only. Nothing else.
+# STEP 10 — Output the final JSON object only. Nothing else.
 
-NOW PROCESS THE FOLLOWING INPUT
-================================
-RULE ID       : {rule_id}
-RULE NAME     : {rule_name}
-PARENT REF    : {parent_ref}
-CLAUSE REF    : {clause_ref}
-TARGET CLAUSE : {target_clause}
-FULL RULE TEXT: {context_text}"""
+# NOW PROCESS THE FOLLOWING INPUT
+# ================================
+# RULE ID       : {rule_id}
+# RULE NAME     : {rule_name}
+# PARENT REF    : {parent_ref}
+# CLAUSE REF    : {clause_ref}
+# TARGET CLAUSE : {target_clause}
+# FULL RULE TEXT: {context_text}"""
 
 
 # ── Bundle Formatter ──────────────────────────────────────────────────────────
@@ -1018,16 +1020,16 @@ def build_normalisation_prompt(
 
 # ── Model Configuration ───────────────────────────────────────────────────────
 
-MODEL_CONFIGS = {
-    "qwen": (
-        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-        "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
-    ),
-    "llama": (
-        "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-        "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
-    ),
-}
+# MODEL_CONFIGS = {
+#     "qwen": (
+#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#         "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
+#     ),
+#     "llama": (
+#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+#         "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
+#     ),
+# }
 
 
 def load_normalizer_model(model_name: str = "qwen") -> Llama:
@@ -1051,7 +1053,7 @@ def load_normalizer_model(model_name: str = "qwen") -> Llama:
             f"Unknown model '{model_name}'. "
             f"Choose from: {list(MODEL_CONFIGS)}"
         )
-    path = MODEL_CONFIGS[model_name]
+    path = MODEL_CONFIGS[model_name]["path"]
     print(f"  Loading normaliser model: {model_name}")
     print(f"  Path: {path}")
     return Llama(
@@ -1222,11 +1224,11 @@ def assemble_document(
 # ── Steps 1 & 2: Scraping Pipeline ───────────────────────────────────────────
 
 # PARSED_CHECKPOINT    = Path("data/parsed_rules.json")
-BASE_DIR = Path(__file__).resolve().parent.parent
-PARSED_CHECKPOINT = BASE_DIR / "data" / "parsed_rules.json"
+# BASE_DIR = Path(__file__).resolve().parent.parent
+# PARSED_CHECKPOINT = BASE_DIR / "data" / "parsed_rules.json"
 
 # NORMALIZED_CHECKPOINT = Path("data/normalized_documents.jsonl")
-NORMALIZED_CHECKPOINT = BASE_DIR / "data" / "normalized_documents.jsonl"
+# NORMALIZED_CHECKPOINT = BASE_DIR / "data" / "normalized_documents.jsonl"
 
 
 def run_scraping_pipeline() -> dict:
