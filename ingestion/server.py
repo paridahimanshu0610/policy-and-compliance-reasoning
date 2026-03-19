@@ -83,6 +83,8 @@ _collection  = None
 _model_name  = "llama"
 _top_k       = 5
 _max_ctx     = MODEL_CONFIGS["llama"]["max_context_tokens"]
+# llama_cpp is not fork-safe, so we use a single worker for all LLM calls
+# Explanation: https://chatgpt.com/s/t_69bb329487288191a7add2f55fba9fcf
 _executor    = ThreadPoolExecutor(max_workers=1)
 
 # In-memory session store  { session_id: session_dict }
@@ -133,7 +135,8 @@ def _new_session() -> dict:
         # Follow-up conversation history
         "followup_history":   [],      # list of {role, content} dicts
         # Token tracking (character-based approximation: 4 chars ≈ 1 token)
-        "tokens_used":        0,
+        "tokens_used_clarification": 0,   # clarification phase only
+        "tokens_used_followup":      0,   # follow-up phase only
     }
 
 
@@ -143,9 +146,11 @@ def _approx_tokens(text: str) -> int:
 
 
 def _context_pcts(session: dict) -> tuple[int, int]:
-    """Returns (used_pct, remaining_pct) as integers 0–100."""
-    used      = session["tokens_used"]
-    pct_used  = min(100, int(used / _max_ctx * 100))
+    if session["phase"] == "followup" or session["phase"] == "ended":
+        used = session["tokens_used_followup"]
+    else:
+        used = session["tokens_used_clarification"]
+    pct_used = min(100, int(used / _max_ctx * 100))
     return pct_used, 100 - pct_used
 
 
@@ -172,6 +177,8 @@ def _session_response(
 async def _run_in_executor(fn, *args):
     """Runs a synchronous (blocking) function in the thread executor."""
     loop = asyncio.get_event_loop()
+    # await on the main thread's event loop while the worker thread runs the blocking function.
+    # This allows the FastAPI server to remain responsive even while the model is running inference.
     return await loop.run_in_executor(_executor, fn, *args)
 
 
@@ -198,9 +205,20 @@ def _do_clarification_turn(session: dict, user_message: str) -> dict:
 
     session["conversation"]    = result["conversation"]
     session["questions_asked"] = result["questions_asked"]
-    session["tokens_used"]    += _approx_tokens(user_message) + _approx_tokens(result["content"])
+    session["tokens_used_clarification"]   += _approx_tokens(user_message) + _approx_tokens(result["content"])
 
     if result["type"] == "question":
+        # ── CHECK 1: after every clarification question ───────────────────
+        _, remaining_pct = _context_pcts(session)
+        if remaining_pct <= CONTEXT_HARD_LIMIT_PCT:
+            session["phase"] = "ended"
+            return _session_response(
+                session,
+                result["content"] + (
+                    "\n\n---\n*Context limit reached. "
+                    "Please start a new conversation to continue.*"
+                ),
+            )
         return _session_response(session, result["content"])
 
     # ── [READY_TO_STRUCTURE] received — run the full pipeline ─────────────
@@ -216,7 +234,7 @@ def _do_clarification_turn(session: dict, user_message: str) -> dict:
             "conversation. Please start a new session and try rephrasing "
             "your question."
         )
-        session["tokens_used"] += _approx_tokens(msg)
+        session["tokens_used_clarification"] += _approx_tokens(msg)
         return _session_response(session, msg)
 
     intent["situation_summary"] = situation_summary
@@ -225,20 +243,36 @@ def _do_clarification_turn(session: dict, user_message: str) -> dict:
     # Retrieval
     retrieved = retrieve_clauses(intent, _collection, top_k=_top_k)
     session["retrieved_clauses"] = retrieved
-    session["tokens_used"] += sum(
+    session["tokens_used_clarification"] += sum(
         _approx_tokens(c.get("document", "")) for c in retrieved
     )
+
+    # ── CHECK 2: after retrieval, before the reasoning LLM call ──────────
+    _, remaining_pct = _context_pcts(session)
+    if remaining_pct <= CONTEXT_HARD_LIMIT_PCT:
+        session["phase"] = "ended"
+        return _session_response(
+            session,
+            "Context limit reached before reasoning could complete. "
+            "Please start a new conversation.",
+        )
 
     # Compliance reasoning
     answer = run_compliance_reasoning(_model, situation_summary, retrieved)
     session["reasoning_answer"] = answer
-    session["tokens_used"]     += _approx_tokens(answer.get("raw", ""))
+    session["tokens_used_followup"]     += _approx_tokens(answer.get("raw", ""))
 
+    system_prompt_approx = (
+        _approx_tokens(situation_summary) +
+        sum(_approx_tokens(c.get("document", "")[:400]) for c in retrieved) +
+        _approx_tokens(answer.get("raw", "")[:1200])
+    )
+    session["tokens_used_followup"] = system_prompt_approx
     session["phase"] = "followup"
 
     # Format the answer as a single readable string for the UI
     formatted = _format_reasoning_for_ui(answer)
-    session["tokens_used"] += _approx_tokens(formatted)
+    session["tokens_used_followup"] += _approx_tokens(formatted)
 
     return _session_response(session, formatted, retrieved_clauses=retrieved)
 
@@ -270,7 +304,7 @@ def _do_followup_turn(session: dict, user_message: str) -> dict:
     Uses the already-retrieved clauses and the initial reasoning answer
     as fixed context. No new retrieval is performed.
     """
-    session["tokens_used"] += _approx_tokens(user_message)
+    session["tokens_used_followup"] += _approx_tokens(user_message)
 
     response_text = run_followup_reasoning(
         model                 = _model,
@@ -283,7 +317,7 @@ def _do_followup_turn(session: dict, user_message: str) -> dict:
 
     session["followup_history"].append({"role": "user",      "content": user_message})
     session["followup_history"].append({"role": "assistant", "content": response_text})
-    session["tokens_used"] += _approx_tokens(response_text)
+    session["tokens_used_followup"] += _approx_tokens(response_text)
 
     # Check whether context is exhausted after this turn
     _, remaining_pct = _context_pcts(session)
