@@ -1,4 +1,19 @@
 # policy-and-compliance-reasoning
+
+### Important files to run:
+
+# Build knowledge base
+python -m ingestion.build_knowledge_base --model llama
+
+# Run FastAPI web server
+python -m web.server --model llama
+
+# Run terminal chatbot
+python app.py --model llama
+
+# Run MCP server
+python mcp_server.py
+
 ### Relevant resources:
 #### Main discussion thread:
 https://chatgpt.com/c/6980fea9-d24c-8328-aea1-837b5c1cb301

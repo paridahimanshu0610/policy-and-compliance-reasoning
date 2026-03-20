@@ -1,6 +1,7 @@
 .vscode
 models
 data
+data1
 artifacts
 logs
 */__pycache__

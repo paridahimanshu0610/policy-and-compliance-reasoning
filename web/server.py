@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="FINRA Compliance Reasoning System", lifespan=lifespan)
 
 # Serve static files (index.html) from ./static
-static_dir = Path(__file__).parent.parent / "static"
+static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 

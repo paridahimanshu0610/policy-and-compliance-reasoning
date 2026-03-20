@@ -74,6 +74,7 @@ MAX_REASONING_CHARS = 5000
 
 # ── FINRA scraper ─────────────────────────────────────────────────────────────
 TARGET_RULES = [
+    # ── Supervisory Responsibilities ──────────────────────────────────────
     {
         "rule_id":  "3110",
         "name":     "Supervision",
@@ -92,18 +93,131 @@ TARGET_RULES = [
         "category": "supervision",
         "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3130",
     },
+    # {
+    #     "rule_id":  "3150",
+    #     "name":     "Holding of Customer Mail",
+    #     "category": "customer_communication",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3150",
+    # },
+    # {
+    #     "rule_id":  "3160",
+    #     "name":     "Networking Arrangements Between Members and Financial Institutions",
+    #     "category": "customer_communication",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3160",
+    # },
+    # {
+    #     "rule_id":  "3170",
+    #     "name":     "Tape Recording of Registered Persons by Certain Firms",
+    #     "category": "customer_communication",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3170",
+    # },
+
+    # ── Responsibilities Relating to Associated Persons ───────────────────
+    # {
+    #     "rule_id":  "3210",
+    #     "name":     "Accounts At Other Broker-Dealers and Financial Institutions",
+    #     "category": "associated_person_conduct",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3210",
+    # },
+    # {
+    #     "rule_id":  "3220",
+    #     "name":     "Influencing or Rewarding Employees of Others",
+    #     "category": "associated_person_conduct",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3220",
+    # },
+    # {
+    #     "rule_id":  "3230",
+    #     "name":     "Telemarketing",
+    #     "category": "telemarketing",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3230",
+    # },
+    {
+        "rule_id":  "3240",
+        "name":     "Borrowing From or Lending to Customers",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3240",
+    },
+    # {
+    #     "rule_id":  "3241",
+    #     "name":     "Registered Person Being Named a Customer's Beneficiary or Holding a Position of Trust for a Customer",
+    #     "category": "associated_person_conduct",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3241",
+    # },
+    # {
+    #     "rule_id":  "3250",
+    #     "name":     "Designation of Accounts",
+    #     "category": "account_management",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3250",
+    # },
+    # {
+    #     "rule_id":  "3260",
+    #     "name":     "Discretionary Accounts",
+    #     "category": "account_management",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3260",
+    # },
+    {
+        "rule_id":  "3270",
+        "name":     "Outside Business Activities of Registered Persons",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3270",
+    },
+    {
+        "rule_id":  "3280",
+        "name":     "Private Securities Transactions of an Associated Person",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3280",
+    },
+    # ── Anti-Money Laundering ─────────────────────────────────────────────
+    # {
+    #     "rule_id":  "3310",
+    #     "name":     "Anti-Money Laundering Compliance Program",
+    #     "category": "AML",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3310",
+    # },
+
+    # ── Books and Records ─────────────────────────────────────────────────
     {
         "rule_id":  "4511",
         "name":     "General Requirements for Books and Records",
-        "category": "recordkeeping",
+        "category": "books_and_records",
         "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4511",
     },
-    {
-        "rule_id":  "3230",
-        "name":     "Telemarketing",
-        "category": "telemarketing",
-        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3230",
-    },
+    # {
+    #     "rule_id":  "4512",
+    #     "name":     "Customer Account Information",
+    #     "category": "books_and_records",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4512",
+    # },
+    # {
+    #     "rule_id":  "4513",
+    #     "name":     "Records of Written Customer Complaints",
+    #     "category": "books_and_records",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4513",
+    # },
+    # {
+    #     "rule_id":  "4514",
+    #     "name":     "Authorization Records for Negotiable Instruments Drawn From a Customer's Account",
+    #     "category": "books_and_records",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4514",
+    # },
+    # {
+    #     "rule_id":  "4515",
+    #     "name":     "Approval and Documentation of Changes in Account Name or Designation",
+    #     "category": "books_and_records",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4515",
+    # },
+    # {
+    #     "rule_id":  "4517",
+    #     "name":     "Member Filing and Contact Information Requirements",
+    #     "category": "books_and_records",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4517",
+    # },
+    # {
+    #     "rule_id":  "4518",
+    #     "name":     "Notification to FINRA in Connection with the JOBS Act",
+    #     "category": "books_and_records",
+    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4518",
+    # },
 ]
 
 SCRAPER_HEADERS = {

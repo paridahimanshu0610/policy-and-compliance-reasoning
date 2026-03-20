@@ -43,7 +43,7 @@ from config.settings import (
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-from parse_finra import (
+from .parse_finra import (
     load_normalizer_model,
     run_scraping_pipeline,
     run_normalization_pipeline,
