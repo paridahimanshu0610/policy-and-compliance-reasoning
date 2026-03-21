@@ -18,7 +18,7 @@ FastAPI event loop is never blocked.
 
 Usage:
     pip install fastapi uvicorn
-    python server.py                   # qwen, default settings
+    python server.py                   # default model, default settings
     python server.py --model llama
     python server.py --model qwen --top-k 8 --port 8000
 """
@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from config.settings import (
     MODEL_CONFIGS, MAX_CLARIFY_QUESTIONS,
     CONTEXT_WARN_THRESHOLD, CONTEXT_HARD_LIMIT_PCT,
-    DEFAULT_TOP_K, MAX_REASONING_CHARS, MAX_CLAUSE_CHARS,
+    DEFAULT_MODEL, DEFAULT_TOP_K, MAX_REASONING_CHARS, MAX_CLAUSE_CHARS,
 )
 from contextlib import asynccontextmanager
 
@@ -86,9 +86,9 @@ from pipeline.retrieval import load_collection, retrieve_clauses
 
 _model       = None
 _collection  = None
-_model_name  = "llama"
-_top_k       = 5
-_max_ctx     = MODEL_CONFIGS["llama"]["max_context_tokens"]
+_model_name  = DEFAULT_MODEL
+_top_k       = DEFAULT_TOP_K
+_max_ctx     = MODEL_CONFIGS[DEFAULT_MODEL]["max_context_tokens"]
 # llama_cpp is not fork-safe, so we use a single worker for all LLM calls
 # Explanation: https://chatgpt.com/s/t_69bb329487288191a7add2f55fba9fcf
 _executor    = ThreadPoolExecutor(max_workers=1)
@@ -459,8 +459,8 @@ def _load_model_sync(model_name: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="FINRA Compliance Chatbot Server")
-    parser.add_argument("--model",  choices=["qwen", "llama"], default="llama")
-    parser.add_argument("--top-k",  type=int, default=5)
+    parser.add_argument("--model",  choices=["qwen", "llama"], default=DEFAULT_MODEL)
+    parser.add_argument("--top-k",  type=int, default=DEFAULT_TOP_K)
     parser.add_argument("--port",   type=int, default=8000)
     parser.add_argument("--host",   type=str, default="127.0.0.1")
     return parser.parse_args()
