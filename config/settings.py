@@ -10,6 +10,9 @@ a different location.
 """
 
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+load_dotenv(override=True)
 
 # ── Project root ──────────────────────────────────────────────────────────────
 # Resolved from this file's location: config/ is one level below root
@@ -20,6 +23,7 @@ DATA_DIR              = BASE_DIR / "data"
 CHROMA_PATH           = DATA_DIR / "chromadb"
 PARSED_CHECKPOINT     = DATA_DIR / "parsed_rules.json"
 NORMALIZED_CHECKPOINT = DATA_DIR / "normalized_documents.jsonl"
+HTML_DIR = DATA_DIR / "FINRA_Rules"
 
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
 COLLECTION_NAME = "finra_clauses"
@@ -52,6 +56,16 @@ MODEL_CONFIGS = {
 
 DEFAULT_MODEL = "llama"
 
+# ── Inference Backend ─────────────────────────────────────────────────────────
+# Set to "local" or "tamu"
+INFERENCE_BACKEND = "tamu"
+
+TAMU_CONFIG = {
+    "api_key":   os.getenv("TAMUS_AI_CHAT_API_KEY"),
+    "base_url":  os.getenv("TAMUS_AI_CHAT_API_ENDPOINT"),
+    "model":     "protected.gpt-5-nano",
+}
+
 # ── Retrieval ─────────────────────────────────────────────────────────────────
 DEFAULT_TOP_K = 5
 
@@ -72,9 +86,87 @@ MAX_CLAUSE_CHARS = 1000
 # dominated by the previous answer on long reasoning outputs.
 MAX_REASONING_CHARS = 5000
 
+SERIES_MAP = {
+    "2010": "2000", "2020": "2000", "2030": "2000", "2040": "2000",
+    "2060": "2000", "2070": "2000", "2080": "2000", "2081": "2000",
+    "2090": "2000",
+    
+    "3110": "3000", "3120": "3000", "3130": "3000", "3150": "3000",
+    "3160": "3000", "3170": "3000", "3210": "3000", "3220": "3000",
+    "3230": "3000", "3240": "3000", "3241": "3000", "3250": "3000",
+    "3260": "3000", "3270": "3000", "3280": "3000", "3310": "3000",
+
+    "4210": "4000", "4220": "4000", "4230": "4000", "4240": "4000",
+    "4311": "4000", "4314": "4000", "4320": "4000", "4330": "4000",
+    "4340": "4000", "4360": "4000", "4370": "4000", "4380": "4000",
+}
+
 # ── FINRA scraper ─────────────────────────────────────────────────────────────
 TARGET_RULES = [
-    # ── Supervisory Responsibilities ──────────────────────────────────────
+    # ============================================================
+    # DUTIES AND CONFLICTS (2000 series)
+    # Justification: I included this to test semantic ambiguity, proving the embedding model can handle abstract, subjective legal concepts like 'suitability' rather than relying on exact keyword matches. 
+    # ============================================================
+    {
+        "rule_id":  "2010",
+        "name":     "Standards of Commercial Honor and Principles of Trade",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2010",
+    },
+    {
+        "rule_id":  "2020",
+        "name":     "Use of Manipulative, Deceptive or Other Fraudulent Devices",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2020",
+    },
+    {
+        "rule_id":  "2030",
+        "name":     "Engaging in Distribution and Solicitation Activities with Government Entities",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2030",
+    },
+    {
+        "rule_id":  "2040",
+        "name":     "Payments to Unregistered Persons",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2040",
+    },
+    {
+        "rule_id":  "2060",
+        "name":     "Use of Information Obtained in Fiduciary Capacity",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2060",
+    },
+    {
+        "rule_id":  "2070",
+        "name":     "Transactions Involving FINRA Employees",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2070",
+    },
+    {
+        "rule_id":  "2080",
+        "name":     "Obtaining an Order of Expungement of Customer Dispute Information from the Central Registration Depository (CRD) System",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2080",
+    },
+    {
+        "rule_id":  "2081",
+        "name":     "Prohibited Conditions Relating to Expungement of Customer Dispute",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2081",
+    },
+    {
+        "rule_id":  "2090",
+        "name":     "Know Your Customer",
+        "category": "duties_and_conflicts",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/2090",
+    },
+
+    # ============================================================
+    # SUPERVISION AND RESPONSIBILITIES RELATING TO ASSOCIATED PERSONS (3000 series)
+    # Justification: I included this to test relational logic, validating that the metadata pipeline can accurately extract and filter based on hierarchical roles, actors, and procedural workflows. 
+    # ============================================================
+    # --- Supervision ---
     {
         "rule_id":  "3110",
         "name":     "Supervision",
@@ -93,68 +185,68 @@ TARGET_RULES = [
         "category": "supervision",
         "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3130",
     },
-    # {
-    #     "rule_id":  "3150",
-    #     "name":     "Holding of Customer Mail",
-    #     "category": "customer_communication",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3150",
-    # },
-    # {
-    #     "rule_id":  "3160",
-    #     "name":     "Networking Arrangements Between Members and Financial Institutions",
-    #     "category": "customer_communication",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3160",
-    # },
-    # {
-    #     "rule_id":  "3170",
-    #     "name":     "Tape Recording of Registered Persons by Certain Firms",
-    #     "category": "customer_communication",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3170",
-    # },
+    {
+        "rule_id":  "3150",
+        "name":     "Holding of Customer Mail",
+        "category": "supervision",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3150",
+    },
+    {
+        "rule_id":  "3160",
+        "name":     "Networking Arrangements Between Members and Financial Institutions",
+        "category": "supervision",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3160",
+    },
+    {
+        "rule_id":  "3170",
+        "name":     "Tape Recording of Registered Persons by Certain Firms",
+        "category": "supervision",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3170",
+    },
 
-    # ── Responsibilities Relating to Associated Persons ───────────────────
-    # {
-    #     "rule_id":  "3210",
-    #     "name":     "Accounts At Other Broker-Dealers and Financial Institutions",
-    #     "category": "associated_person_conduct",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3210",
-    # },
-    # {
-    #     "rule_id":  "3220",
-    #     "name":     "Influencing or Rewarding Employees of Others",
-    #     "category": "associated_person_conduct",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3220",
-    # },
-    # {
-    #     "rule_id":  "3230",
-    #     "name":     "Telemarketing",
-    #     "category": "telemarketing",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3230",
-    # },
+    # --- Responsibilities Relating to Associated Persons ---
+    {
+        "rule_id":  "3210",
+        "name":     "Accounts At Other Broker-Dealers and Financial Institutions",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3210",
+    },
+    {
+        "rule_id":  "3220",
+        "name":     "Influencing or Rewarding Employees of Others",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3220",
+    },
+    {
+        "rule_id":  "3230",
+        "name":     "Telemarketing",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3230",
+    },
     {
         "rule_id":  "3240",
         "name":     "Borrowing From or Lending to Customers",
         "category": "associated_person_conduct",
         "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3240",
     },
-    # {
-    #     "rule_id":  "3241",
-    #     "name":     "Registered Person Being Named a Customer's Beneficiary or Holding a Position of Trust for a Customer",
-    #     "category": "associated_person_conduct",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3241",
-    # },
-    # {
-    #     "rule_id":  "3250",
-    #     "name":     "Designation of Accounts",
-    #     "category": "account_management",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3250",
-    # },
-    # {
-    #     "rule_id":  "3260",
-    #     "name":     "Discretionary Accounts",
-    #     "category": "account_management",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3260",
-    # },
+    {
+        "rule_id":  "3241",
+        "name":     "Registered Person Being Named a Customer's Beneficiary or Holding a Position of Trust for a Customer",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3241",
+    },
+    {
+        "rule_id":  "3250",
+        "name":     "Designation of Accounts",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3250",
+    },
+    {
+        "rule_id":  "3260",
+        "name":     "Discretionary Accounts",
+        "category": "associated_person_conduct",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3260",
+    },
     {
         "rule_id":  "3270",
         "name":     "Outside Business Activities of Registered Persons",
@@ -167,65 +259,103 @@ TARGET_RULES = [
         "category": "associated_person_conduct",
         "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3280",
     },
-    # ── Anti-Money Laundering ─────────────────────────────────────────────
-    # {
-    #     "rule_id":  "3310",
-    #     "name":     "Anti-Money Laundering Compliance Program",
-    #     "category": "AML",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3310",
-    # },
 
-    # ── Books and Records ─────────────────────────────────────────────────
+    # --- Anti-Money Laundering ---
     {
-        "rule_id":  "4511",
-        "name":     "General Requirements for Books and Records",
-        "category": "books_and_records",
-        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4511",
+        "rule_id":  "3310",
+        "name":     "Anti-Money Laundering Compliance Program",
+        "category": "anti_money_laundering",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/3310",
     },
-    # {
-    #     "rule_id":  "4512",
-    #     "name":     "Customer Account Information",
-    #     "category": "books_and_records",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4512",
-    # },
-    # {
-    #     "rule_id":  "4513",
-    #     "name":     "Records of Written Customer Complaints",
-    #     "category": "books_and_records",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4513",
-    # },
-    # {
-    #     "rule_id":  "4514",
-    #     "name":     "Authorization Records for Negotiable Instruments Drawn From a Customer's Account",
-    #     "category": "books_and_records",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4514",
-    # },
-    # {
-    #     "rule_id":  "4515",
-    #     "name":     "Approval and Documentation of Changes in Account Name or Designation",
-    #     "category": "books_and_records",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4515",
-    # },
-    # {
-    #     "rule_id":  "4517",
-    #     "name":     "Member Filing and Contact Information Requirements",
-    #     "category": "books_and_records",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4517",
-    # },
-    # {
-    #     "rule_id":  "4518",
-    #     "name":     "Notification to FINRA in Connection with the JOBS Act",
-    #     "category": "books_and_records",
-    #     "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4518",
-    # },
+
+    # ============================================================
+    # FINANCIAL AND OPERATIONAL RULES (4000 series)
+    # Justification: I included this to test quantitative rigidity, ensuring the architecture can strictly enforce mathematical thresholds and percentages without blurring them in the vector space.
+    # ============================================================
+    # --- Margin ---
+    {
+        "rule_id":  "4210",
+        "name":     "Margin Requirements",
+        "category": "margin",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4210",
+    },
+    {
+        "rule_id":  "4220",
+        "name":     "Daily Record of Required Margin",
+        "category": "margin",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4220",
+    },
+    {
+        "rule_id":  "4230",
+        "name":     "Required Submissions for Requests for Extensions of Time Under Regulation T and SEA Rule 15c3-3",
+        "category": "margin",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4230",
+    },
+    {
+        "rule_id":  "4240",
+        "name":     "Security-Based Swap Margin Requirements",
+        "category": "margin",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4240",
+    },
+
+    # --- Operations ---
+    {
+        "rule_id":  "4311",
+        "name":     "Carrying Agreements",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4311",
+    },
+    {
+        "rule_id":  "4314",
+        "name":     "Securities Loans and Borrowings",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4314",
+    },
+    {
+        "rule_id":  "4320",
+        "name":     "Short Sale Delivery Requirements",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4320",
+    },
+    {
+        "rule_id":  "4330",
+        "name":     "Customer Protection — Permissible Use of Customers' Securities",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4330",
+    },
+    {
+        "rule_id":  "4340",
+        "name":     "Callable Securities",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4340",
+    },
+    {
+        "rule_id":  "4360",
+        "name":     "Fidelity Bonds",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4360",
+    },
+    {
+        "rule_id":  "4370",
+        "name":     "Business Continuity Plans and Emergency Contact Information",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4370",
+    },
+    {
+        "rule_id":  "4380",
+        "name":     "Mandatory Participation in FINRA BC/DR Testing Under Regulation SCI",
+        "category": "operations",
+        "url":      "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4380",
+    },
 ]
 
 SCRAPER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Referer": "https://www.finra.org/rules-guidance/rulebooks/finra-rules",
 }

@@ -181,9 +181,9 @@ Examples:
     )
     parser.add_argument(
         "--model",
-        choices = ["qwen", "llama"],
-        default = "llama",
-        help    = "Local model to use for clause normalisation  (default: llama)",
+        choices = ["qwen", "llama", "tamu"],
+        default = "tamu",
+        help    = "Model backend for clause normalisation: 'qwen'/'llama' = local GGUF, 'tamu' = TAMU Chat API  (default: llama)",
     )
     parser.add_argument(
         "--skip-scraping",
