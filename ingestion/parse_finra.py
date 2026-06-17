@@ -51,6 +51,36 @@ def find_html_file(rule_id: str) -> Path | None:
 
     return matches[0]  # take first match if multiple
 
+# Tags that introduce a genuine block-level/structural boundary, or that
+# receive special handling later in the pipeline (strong/b -> HEADING_MARKER).
+# Every other tag found in the source HTML is treated as purely inline/
+# cosmetic (underline spans, hyperlinked cross-references, custom <ref>
+# tags, italics, superscripts, etc.) and is stripped before parsing.
+STRUCTURAL_TAGS = {
+    "div", "p", "table", "tr", "td", "th", "tbody", "thead", "tfoot",
+    "li", "ul", "ol", "br",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "strong", "b",
+}
+
+_TAG_RE = re.compile(r"</?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>")
+
+
+def _strip_non_structural_tags(html: str) -> str:
+    """
+    Removes any tag whose name is not in STRUCTURAL_TAGS, keeping its text
+    content in place. Operates on the raw string before BeautifulSoup
+    parses it, so the surrounding text merges into a single text node
+    instead of remaining fragmented across a tag boundary -- which is what
+    matters, since get_text(separator=...) separates per text node
+    regardless of tag nesting.
+    """
+    def _replace(match: re.Match) -> str:
+        tag_name = match.group(1).lower()
+        return match.group(0) if tag_name in STRUCTURAL_TAGS else ""
+
+    return _TAG_RE.sub(_replace, html)
+
 # ── Step 1: Scraping ──────────────────────────────────────────────────────────
 
 def scrape_rule_page(rule_id: str) -> str:
@@ -71,6 +101,8 @@ def scrape_rule_page(rule_id: str) -> str:
     except Exception as e:
         print(f"  ✗ Failed to read {html_path}: {e}")
         return ""
+
+    html = _strip_non_structural_tags(html)
 
     soup = BeautifulSoup(html, "html.parser")
 
@@ -116,20 +148,52 @@ class Seq(Enum):
     ALPHA_LO = auto()   # a, b, c … (plain letter)
     ROMAN    = auto()   # i, ii, iii, iv, v …
 
-_ROMAN: list[str] = [
-    "i","ii","iii","iv","v","vi","vii","viii","ix","x",
-    "xi","xii","xiii","xiv","xv","xvi","xvii","xviii","xix","xx",
-    "xxi","xxii","xxiii","xxiv","xxv","xxvi","xxvii","xxviii","xxix","xxx",
-]
-_ROMAN_ORD: dict[str, int] = {r: i for i, r in enumerate(_ROMAN)}
+_ROMAN_VALUES: dict[str, int] = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+def _int_to_roman(n: int) -> str:
+    table = [
+        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+    ]
+    result = []
+    for value, symbol in table:
+        count, n = divmod(n, value)
+        result.append(symbol * count)
+    return "".join(result)
+
+def _roman_to_int(token: str) -> int | None:
+    """
+    Converts a lowercase roman numeral to its 1-based integer value, or
+    None if invalid. No hardcoded ceiling -- the previous static list
+    stopped at "xxx" (30), so every marker past it (4210(f)(2)(A) runs
+    through "xxxvi") fell through to the ALPHA_LO catch-all, which always
+    returns ordinal 0, so _push() treated each one as the start of a new
+    child list instead of the next sibling: (xxx) -> (xxx)(xxxi) -> ...
+    The round-trip check rejects malformed input like "iiii" or "vx".
+    """
+    token = token.lower()
+    if not token or any(ch not in _ROMAN_VALUES for ch in token):
+        return None
+
+    total = 0
+    prev_value = 0
+    for ch in reversed(token):
+        value = _ROMAN_VALUES[ch]
+        if value < prev_value:
+            total -= value
+        else:
+            total += value
+            prev_value = value
+
+    if _int_to_roman(total) != token:
+        return None
+    return total
 
 def _interp(token: str) -> list[tuple[Seq, int]]:
     """Return every plausible (Seq, 0-based-ordinal) pair for a marker token."""
-    # Catch FINRA Supplementary Material markers (e.g., ".01")
     if token.startswith("."):
-        # Strip the dot and convert to int (e.g., ".01" -> 1 -> ordinal 0)
         return [(Seq.DECIMAL, int(token[1:]) - 1)]
-        
     if re.fullmatch(r"\d+", token):
         return [(Seq.NUMERIC, int(token) - 1)]
     if re.fullmatch(r"[A-Z]", token):
@@ -139,8 +203,11 @@ def _interp(token: str) -> list[tuple[Seq, int]]:
     out: list[tuple[Seq, int]] = []
     if len(token) == 1:
         out.append((Seq.ALPHA_LO, ord(lo) - ord("a")))
-    if lo in _ROMAN_ORD:
-        out.append((Seq.ROMAN, _ROMAN_ORD[lo]))
+
+    roman_value = _roman_to_int(lo)
+    if roman_value is not None:
+        out.append((Seq.ROMAN, roman_value - 1))
+
     return out or [(Seq.ALPHA_LO, 0)]
 
 @dataclass
@@ -219,9 +286,24 @@ class _TAMUBackend:
     
 # ── 2. Clause Splitting Logic ─────────────────────────────────────────────────
 
-CLAUSE_PATTERN = re.compile(
-    rf"(?m)(?=^\s*{HEADING_MARKER}?(?:\([a-zA-Z0-9]+\)(?:\([a-zA-Z0-9]+\))*|\.[0-9]+(?:[ \t]|$)))"
+# The decimal marker (".01", ".02", ...) exists to catch FINRA's
+# Supplementary Material numbering, but it's syntactically identical to a
+# plain decimal with no leading zero (".35 percent" in a margin table).
+# FINRA only ever uses ".NN" as a structural marker inside the dedicated
+# Supplementary Material section, so we build is_sm-aware variants and pick
+# the right one in split_text_block, instead of one pattern for both.
+_MARKER_CORE  = r"\([a-zA-Z0-9]+\)(?:\([a-zA-Z0-9]+\))*"
+_DECIMAL_CORE = r"\.[0-9]+"
+
+CLAUSE_PATTERN_MAIN = re.compile(
+    rf"(?m)(?=^\s*{HEADING_MARKER}?{_MARKER_CORE})"
 )
+CLAUSE_PATTERN_SM = re.compile(
+    rf"(?m)(?=^\s*{HEADING_MARKER}?(?:{_MARKER_CORE}|{_DECIMAL_CORE}(?:[ \t]|$)))"
+)
+
+REF_MATCH_MAIN = re.compile(rf"^{HEADING_MARKER}?({_MARKER_CORE})")
+REF_MATCH_SM   = re.compile(rf"^{HEADING_MARKER}?({_MARKER_CORE}|{_DECIMAL_CORE})")
 
 
 def get_parent_clause(clause_ref: str) -> str | None:
@@ -253,7 +335,11 @@ def split_text_block(text: str, rule_id: str, is_sm: bool) -> list[dict]:
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
 
-    segments = CLAUSE_PATTERN.split(text)
+    clause_pattern = CLAUSE_PATTERN_SM if is_sm else CLAUSE_PATTERN_MAIN
+    ref_pattern     = REF_MATCH_SM if is_sm else REF_MATCH_MAIN
+
+    segments = clause_pattern.split(text)   # was: CLAUSE_PATTERN.split(text)
+
     clauses = []
     stack: list[_SE] = []
 
@@ -271,7 +357,7 @@ def split_text_block(text: str, rule_id: str, is_sm: bool) -> list[dict]:
         strong_matches = re.findall(rf"{HEADING_MARKER}([^{HEADING_MARKER}]+){HEADING_MARKER}", first_line)
 
         # Extract leading marker (accounting for an optional hidden heading marker)
-        ref_match = re.match(rf"^{HEADING_MARKER}?(\([a-zA-Z0-9]+\)(?:\([a-zA-Z0-9]+\))*|\.[0-9]+)", seg)
+        ref_match = ref_pattern.match(seg)
         
         if ref_match:
             full_marker_str = ref_match.group(1)
@@ -996,3 +1082,6 @@ def run_normalization_pipeline(
     print(f"  ✓ Checkpoint updated → {NORMALIZED_CHECKPOINT}")
 
     return existing_docs + new_docs
+
+if __name__ == "__main__":
+    run_scraping_pipeline()
