@@ -1,7 +1,7 @@
 """
 FINRA Rules Scraper and Normalizer
 ====================================
-Scrapes FINRA rules 3110, 3120, 3130, 4511 and normalizes them
+Scrapes FINRA rules 2000, 3000, 4000 and normalizes them
 into structured JSON for the MCP Compliance Reasoning System.
 
 Usage:
@@ -26,7 +26,7 @@ from config.prompts  import CLAUSE_NORMALISATION_PROMPT
 # ── Configuration ────────────────────────────────────────────────────────────
 
 # Hidden marker to preserve strong/bold tag boundaries post-HTML extraction
-HEADING_MARKER = "\ue000" 
+HEADING_MARKER = "\ue000"
 
 def find_html_file(rule_id: str) -> Path | None:
     """
@@ -51,11 +51,18 @@ def find_html_file(rule_id: str) -> Path | None:
 
     return matches[0]  # take first match if multiple
 
+# ── Step 1: Scraping ──────────────────────────────────────────────────────────
+
 # Tags that introduce a genuine block-level/structural boundary, or that
 # receive special handling later in the pipeline (strong/b -> HEADING_MARKER).
 # Every other tag found in the source HTML is treated as purely inline/
-# cosmetic (underline spans, hyperlinked cross-references, custom <ref>
-# tags, italics, superscripts, etc.) and is stripped before parsing.
+# cosmetic (underlined spans, hyperlinked cross-references, custom <ref>
+# tags for rule citations, italics, superscripts, etc.) and is stripped
+# before parsing. Stripping from the raw string is essential: unwrapping
+# after parsing does NOT fix the problem because BeautifulSoup's
+# get_text(separator="\n") inserts the separator between every text node
+# regardless of tag nesting, so even an unwrapped tag's former content
+# remains a distinct sibling node and still picks up a spurious "\n".
 STRUCTURAL_TAGS = {
     "div", "p", "table", "tr", "td", "th", "tbody", "thead", "tfoot",
     "li", "ul", "ol", "br",
@@ -68,12 +75,8 @@ _TAG_RE = re.compile(r"</?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>")
 
 def _strip_non_structural_tags(html: str) -> str:
     """
-    Removes any tag whose name is not in STRUCTURAL_TAGS, keeping its text
-    content in place. Operates on the raw string before BeautifulSoup
-    parses it, so the surrounding text merges into a single text node
-    instead of remaining fragmented across a tag boundary -- which is what
-    matters, since get_text(separator=...) separates per text node
-    regardless of tag nesting.
+    Removes any HTML/XML-style tag whose name is not in STRUCTURAL_TAGS,
+    keeping its text content in place.
     """
     def _replace(match: re.Match) -> str:
         tag_name = match.group(1).lower()
@@ -81,7 +84,6 @@ def _strip_non_structural_tags(html: str) -> str:
 
     return _TAG_RE.sub(_replace, html)
 
-# ── Step 1: Scraping ──────────────────────────────────────────────────────────
 
 def scrape_rule_page(rule_id: str) -> str:
     """
@@ -102,6 +104,12 @@ def scrape_rule_page(rule_id: str) -> str:
         print(f"  ✗ Failed to read {html_path}: {e}")
         return ""
 
+    # Strip all non-structural inline tags (span, a, ref, em, sup, …) from
+    # the raw HTML string before BeautifulSoup parses it. This prevents
+    # get_text(separator="\n") from inserting a spurious line break at every
+    # tag boundary mid-sentence, which would otherwise make parenthetical
+    # cross-references like "(b)(1)" or "(Supervision)" appear at the start
+    # of their own lines and be mistaken for genuine clause markers.
     html = _strip_non_structural_tags(html)
 
     soup = BeautifulSoup(html, "html.parser")
@@ -131,7 +139,17 @@ def scrape_rule_page(rule_id: str) -> str:
         else:
             tag.decompose()
 
-    return rule_div.get_text(separator="\n", strip=True)
+    text = rule_div.get_text(separator="\n", strip=True)
+
+    # Normalize non-breaking spaces (\xa0 from &nbsp;) to regular spaces.
+    # &nbsp; appears throughout FINRA's HTML (e.g. "FINRA&nbsp;Rule 2010").
+    # If left as \xa0, the continuation checks in should_merge_upward
+    # (endswith(" and"), endswith("; or") etc.) silently miss clauses whose
+    # conjunctions were joined with a non-breaking space, causing those
+    # fragments to escape the upward merge they need.
+    text = text.replace("\xa0", " ")
+
+    return text
 
 # ── Step 2: Clause Splitting ──────────────────────────────────────────────────
 
@@ -139,22 +157,30 @@ import re
 from dataclasses import dataclass
 from enum import Enum, auto
 
-# ── 1. Sequence classification (Updated with Decimal) ─────────────────────────
+# ── 1. Sequence classification ────────────────────────────────────────────────
 
 class Seq(Enum):
-    DECIMAL  = auto()   # .01, .02, .03 … (For Supplementary Material)
-    NUMERIC  = auto()   # 1, 2, 3 …
-    ALPHA_UP = auto()   # A, B, C …
-    ALPHA_LO = auto()   # a, b, c … (plain letter)
-    ROMAN    = auto()   # i, ii, iii, iv, v …
+    DECIMAL      = auto()   # .01, .02 … (Supplementary Material only)
+    NUMERIC      = auto()   # (1), (2), (3) …
+    ALPHA_UP     = auto()   # (A), (B), (C) …
+    ALPHA_LO     = auto()   # (a), (b), (c) …
+    ROMAN        = auto()   # (i), (ii), (iii) …
+    DOT_NUMERIC  = auto()   # 1., 2., 3. …  (dot-marker sub-levels)
+    DOT_ALPHA_UP = auto()   # A., B., C. …
+    DOT_ALPHA_LO = auto()   # a., b., c. …
 
-_ROMAN_VALUES: dict[str, int] = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+_ROMAN_VALUES: dict[str, int] = {
+    "i": 1, "v": 5, "x": 10, "l": 50,
+    "c": 100, "d": 500, "m": 1000,
+}
+
 
 def _int_to_roman(n: int) -> str:
+    """Standard integer → lowercase roman numeral."""
     table = [
         (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
-        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
-        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+        (100,  "c"), (90,  "xc"), (50,  "l"), (40,  "xl"),
+        (10,   "x"), (9,   "ix"), (5,   "v"), (4,   "iv"), (1, "i"),
     ]
     result = []
     for value, symbol in table:
@@ -162,15 +188,22 @@ def _int_to_roman(n: int) -> str:
         result.append(symbol * count)
     return "".join(result)
 
+
 def _roman_to_int(token: str) -> int | None:
     """
-    Converts a lowercase roman numeral to its 1-based integer value, or
-    None if invalid. No hardcoded ceiling -- the previous static list
-    stopped at "xxx" (30), so every marker past it (4210(f)(2)(A) runs
-    through "xxxvi") fell through to the ALPHA_LO catch-all, which always
-    returns ordinal 0, so _push() treated each one as the start of a new
-    child list instead of the next sibling: (xxx) -> (xxx)(xxxi) -> ...
-    The round-trip check rejects malformed input like "iiii" or "vx".
+    Converts a lowercase roman numeral string to its 1-based integer value,
+    or returns None if it isn't a valid roman numeral.
+
+    The original implementation used a static list capped at "xxx" (30).
+    Rule 4210(f)(2)(A) has sub-clause labels running through "(xxxvi)" (36),
+    so every token past "xxx" fell through to the ALPHA_LO catch-all in
+    _interp(), which always returns ordinal 0. _push() then treated each
+    one as "the start of a new child list" instead of "the next sibling",
+    producing runaway nesting: (xxx) → (xxx)(xxxi) → (xxx)(xxxi)(xxxii) …
+
+    This version computes the value directly with no ceiling.
+    The round-trip check (re-encode the integer back to roman and compare)
+    rejects malformed strings like "iiii" or "vx".
     """
     token = token.lower()
     if not token or any(ch not in _ROMAN_VALUES for ch in token):
@@ -188,12 +221,30 @@ def _roman_to_int(token: str) -> int | None:
 
     if _int_to_roman(total) != token:
         return None
+
     return total
+
 
 def _interp(token: str) -> list[tuple[Seq, int]]:
     """Return every plausible (Seq, 0-based-ordinal) pair for a marker token."""
+
+    # SM decimal marker: .01, .02 …
     if token.startswith("."):
         return [(Seq.DECIMAL, int(token[1:]) - 1)]
+
+    # Dot markers: a., b., A., B., 1., 2. …
+    # Exactly one letter or non-zero digit followed by a period.
+    # Each has its own unique Seq type so _push never confuses them with
+    # their parenthesised equivalents (ALPHA_LO, ALPHA_UP, NUMERIC).
+    if re.fullmatch(r"[a-zA-Z1-9]\.", token):
+        ch = token[0]
+        if ch.isupper():
+            return [(Seq.DOT_ALPHA_UP, ord(ch) - ord("A"))]
+        elif ch.isdigit():
+            return [(Seq.DOT_NUMERIC, int(ch) - 1)]
+        else:
+            return [(Seq.DOT_ALPHA_LO, ord(ch) - ord("a"))]
+
     if re.fullmatch(r"\d+", token):
         return [(Seq.NUMERIC, int(token) - 1)]
     if re.fullmatch(r"[A-Z]", token):
@@ -210,18 +261,21 @@ def _interp(token: str) -> list[tuple[Seq, int]]:
 
     return out or [(Seq.ALPHA_LO, 0)]
 
+
 @dataclass
 class _SE:
     token:   str
     seq:     Seq
     ordinal: int
 
+
 def _push(stack: list[_SE], token: str) -> list[_SE]:
     """Incorporate one marker token into the hierarchy stack."""
     interps = _interp(token)
     parent  = stack[-1] if stack else None
 
-    # 1. Preferred child
+    # 1. Preferred child: when inside a NUMERIC/ROMAN/ALPHA_UP sequence,
+    #    treat a token that could be roman-zero as the start of a roman list.
     if parent is not None and parent.seq in (Seq.NUMERIC, Seq.ROMAN, Seq.ALPHA_UP):
         roman_zero = next(
             ((s, o) for s, o in interps if s is Seq.ROMAN and o == 0), None
@@ -229,7 +283,8 @@ def _push(stack: list[_SE], token: str) -> list[_SE]:
         if roman_zero:
             return stack + [_SE(token, *roman_zero)]
 
-    # 2. Ancestor continuation
+    # 2. Ancestor continuation: walk back for a matching sequence type
+    #    whose ordinal is exactly one less than ours.
     for i in range(len(stack) - 1, -1, -1):
         e = stack[i]
         for s, o in interps:
@@ -248,62 +303,47 @@ def _push(stack: list[_SE], token: str) -> list[_SE]:
 
     return stack + [_SE(token, *chosen)]
 
-class _TAMUBackend:
-    """
-    Wraps the TAMU Chat API (OpenAI-compatible) so it presents the same
-    .create_chat_completion(messages, temperature, max_tokens) interface
-    as llama_cpp.Llama — no changes needed in normalize_clause.
-    """
-    def __init__(self):
-        from openai import OpenAI
-        self._client = OpenAI(
-            api_key  = TAMU_CONFIG["api_key"],
-            base_url = TAMU_CONFIG["base_url"],
-        )
-        self._model = TAMU_CONFIG["model"]
 
-    def create_chat_completion(
-        self,
-        messages:    list[dict],
-        temperature: float = 0.0,
-        max_tokens:  int   = 4096,
-    ) -> dict:
-        """Returns a dict shaped like llama_cpp's chat completion output."""
-        raw = self._client.chat.completions.create(
-            model       = self._model,
-            messages    = messages,
-            temperature = temperature,
-            max_tokens  = max_tokens,
-        )
-        # Parse the raw SSE/response string if it comes back as text
-        content = _parse_tamu_content(raw)
-        # Re-wrap into llama_cpp-compatible shape
-        return {
-            "choices": [
-                {"message": {"content": content}}
-            ]
-        }
-    
 # ── 2. Clause Splitting Logic ─────────────────────────────────────────────────
 
-# The decimal marker (".01", ".02", ...) exists to catch FINRA's
-# Supplementary Material numbering, but it's syntactically identical to a
-# plain decimal with no leading zero (".35 percent" in a margin table).
-# FINRA only ever uses ".NN" as a structural marker inside the dedicated
-# Supplementary Material section, so we build is_sm-aware variants and pick
-# the right one in split_text_block, instead of one pattern for both.
 _MARKER_CORE  = r"\([a-zA-Z0-9]+\)(?:\([a-zA-Z0-9]+\))*"
 _DECIMAL_CORE = r"\.[0-9]+"
 
+# Dot markers: a single letter or non-zero digit followed by a period,
+# e.g. "a.", "b.", "1.", "2.", "A.", "B.".
+#
+# False-positive guard: the [ \t]+\S suffix in CLAUSE_PATTERN requires one
+# or more spaces then a visible character after the dot, so:
+#   • "e.g. something" does NOT match  ("e." is followed by "g", not a space)
+#   • "(f)(2)(H)(i)b. of this Rule" does NOT match  (mid-line, not line-start)
+#   • ".35 percent" does NOT match  (starts with ".", not a letter/digit)
+#   • "1.5 percent" does NOT match  ("1." is followed by "5", not a space)
+# Only "a. the long positions…" at the very start of a line matches.
+_DOT_MARKER_CORE = r"[a-zA-Z1-9]\."
+
+# Two CLAUSE_PATTERN variants so that ".NN" decimals (Supplementary Material
+# numbering like ".01") are only recognised as markers inside the SM section.
+# In the main rule body they would otherwise collide with percentage values
+# written without a leading zero (".35 percent" in margin tables).
 CLAUSE_PATTERN_MAIN = re.compile(
-    rf"(?m)(?=^\s*{HEADING_MARKER}?{_MARKER_CORE})"
+    rf"(?m)(?=^\s*{HEADING_MARKER}?(?:{_MARKER_CORE}|{_DOT_MARKER_CORE}[ \t]+\S))"
 )
 CLAUSE_PATTERN_SM = re.compile(
-    rf"(?m)(?=^\s*{HEADING_MARKER}?(?:{_MARKER_CORE}|{_DECIMAL_CORE}(?:[ \t]|$)))"
+    rf"(?m)(?=^\s*{HEADING_MARKER}?(?:{_MARKER_CORE}|{_DECIMAL_CORE}(?:[ \t]|$)|{_DOT_MARKER_CORE}[ \t]+\S))"
 )
 
-REF_MATCH_MAIN = re.compile(rf"^{HEADING_MARKER}?({_MARKER_CORE})")
-REF_MATCH_SM   = re.compile(rf"^{HEADING_MARKER}?({_MARKER_CORE}|{_DECIMAL_CORE})")
+# REF_MATCH uses a lookahead (?=[ \t]) for the dot branch: the trailing
+# space is confirmed but NOT consumed, so body = seg[ref_match.end():].strip()
+# works identically to the paren-marker path.
+REF_MATCH_MAIN = re.compile(
+    rf"^{HEADING_MARKER}?((?:{_MARKER_CORE})|(?:{_DOT_MARKER_CORE})(?=[ \t]))"
+)
+REF_MATCH_SM = re.compile(
+    rf"^{HEADING_MARKER}?((?:{_MARKER_CORE})|(?:{_DECIMAL_CORE})|(?:{_DOT_MARKER_CORE})(?=[ \t]))"
+)
+
+# Seq types whose tokens are written verbatim in clause_ref (no parens).
+_DOT_SEQS = (Seq.DECIMAL, Seq.DOT_NUMERIC, Seq.DOT_ALPHA_UP, Seq.DOT_ALPHA_LO)
 
 
 def get_parent_clause(clause_ref: str) -> str | None:
@@ -311,24 +351,21 @@ def get_parent_clause(clause_ref: str) -> str | None:
     Returns the parent clause_ref for a given FINRA clause_ref.
     Returns None if the clause is a topmost node or has no parent.
     """
-    # Regex targets the last marker at the end of the string: 
-    # either parentheses like (A), (1), (a) OR a decimal like .01
-    pattern = r'(\([a-zA-Z0-9]+\)|\.[0-9]+)$'
-    
+    # Match the last marker segment at the end of the ref — paren marker
+    # "(xyz)", SM decimal ".01", or dot marker "a." / "1." / "A."
+    pattern = r'(\([a-zA-Z0-9]+\)|\.[0-9]+|[a-zA-Z1-9]\.)$'
+
     match = re.search(pattern, clause_ref)
-    
-    # If no marker is found at the end (e.g., "FINRA-3110-intro")
     if not match:
         return None
-        
-    # Strip the last marker
+
     parent_ref = clause_ref[:match.start()]
-    
-    # Check if what remains is just the base rule prefix (e.g., "FINRA-3110" or "FINRA-3110-SM")
+
     if re.fullmatch(r'FINRA-\d+(?:-SM)?', parent_ref):
         return None
-        
+
     return parent_ref
+
 
 def split_text_block(text: str, rule_id: str, is_sm: bool) -> list[dict]:
     """Worker function to process a single block of text (Main or SM)."""
@@ -336,11 +373,10 @@ def split_text_block(text: str, rule_id: str, is_sm: bool) -> list[dict]:
     text = re.sub(r"[ \t]+", " ", text)
 
     clause_pattern = CLAUSE_PATTERN_SM if is_sm else CLAUSE_PATTERN_MAIN
-    ref_pattern     = REF_MATCH_SM if is_sm else REF_MATCH_MAIN
+    ref_pattern    = REF_MATCH_SM     if is_sm else REF_MATCH_MAIN
 
-    segments = clause_pattern.split(text)   # was: CLAUSE_PATTERN.split(text)
-
-    clauses = []
+    segments = clause_pattern.split(text)
+    clauses  = []
     stack: list[_SE] = []
 
     base_prefix = f"FINRA-{rule_id}-SM" if is_sm else f"FINRA-{rule_id}"
@@ -351,38 +387,49 @@ def split_text_block(text: str, rule_id: str, is_sm: bool) -> list[dict]:
             continue
 
         clause_heading = ""
-        
+
         # Grab the first line to look for our flattened heading string
         first_line = seg.split('\n', 1)[0]
-        strong_matches = re.findall(rf"{HEADING_MARKER}([^{HEADING_MARKER}]+){HEADING_MARKER}", first_line)
+        strong_matches = re.findall(
+            rf"{HEADING_MARKER}([^{HEADING_MARKER}]+){HEADING_MARKER}", first_line
+        )
 
-        # Extract leading marker (accounting for an optional hidden heading marker)
         ref_match = ref_pattern.match(seg)
-        
+
         if ref_match:
             full_marker_str = ref_match.group(1)
-            
-            # --- Extract Heading ---
+
+            # ── Extract Heading ──────────────────────────────────────────────
             if strong_matches:
                 raw_heading = strong_matches[0].strip()
-                # If the tag contained the marker (e.g. "<strong>(a) System</strong>") strip it
                 if raw_heading.startswith(full_marker_str):
                     clause_heading = raw_heading[len(full_marker_str):].strip()
                 else:
                     clause_heading = raw_heading
-            # -----------------------
 
+            # ── Extract marker tokens and push onto the hierarchy stack ──────
             if full_marker_str.startswith("."):
+                # SM decimal: .01, .02 — single token, no parens
+                markers = [full_marker_str]
+            elif re.fullmatch(r"[a-zA-Z1-9]\.", full_marker_str):
+                # Dot marker: a., 1., A. — single token, no parens to strip
                 markers = [full_marker_str]
             else:
+                # Paren marker: (a), (ii), (e)(2)(F) — extract content inside parens
                 markers = re.findall(r"\(([a-zA-Z0-9]+)\)", full_marker_str)
-            
+
             for m in markers:
                 stack = _push(stack, m)
-            
-            nested_ref = "".join((e.token if e.token.startswith(".") else f"({e.token})") for e in stack)
+
+            # ── Build clause_ref ─────────────────────────────────────────────
+            # Dot-family and SM-decimal tokens are written verbatim;
+            # paren-marker tokens are re-wrapped in parentheses.
+            nested_ref = "".join(
+                e.token if e.seq in _DOT_SEQS else f"({e.token})"
+                for e in stack
+            )
             clause_ref = f"{base_prefix}{nested_ref}"
-            
+
             body = seg[ref_match.end():].strip()
         else:
             if strong_matches:
@@ -397,42 +444,44 @@ def split_text_block(text: str, rule_id: str, is_sm: bool) -> list[dict]:
             continue
 
         clauses.append({
-            "clause_ref": clause_ref,
+            "clause_ref":    clause_ref,
             "parent_clause": get_parent_clause(clause_ref),
-            "raw_text": body_clean,
-            "clause_heading": clause_heading
+            "raw_text":      body_clean,
+            "clause_heading": clause_heading,
         })
 
     return clauses
+
 
 # ── 3. The Orchestrator ───────────────────────────────────────────────────────
 
 def parse_finra_rule(text: str, rule_id: str) -> list[dict]:
     """
-    Splits the document into Main Text and Supplementary Material, 
+    Splits the document into Main Text and Supplementary Material,
     then processes both streams through the clause chunker.
 
-    The raw_text key in the resulting clause dicts is the original unmodified text from the rule. It is not accumulated or merged in any way.
+    The raw_text key in the resulting clause dicts is the original
+    unmodified text from the rule. It is not accumulated or merged in
+    any way.
     """
-    # Updated regex to tolerate the hidden HEADING_MARKER (\ue000) 
-    # anywhere before the bullets or before the text itself.
     sm_separator = re.compile(
         rf"(?m)^[ \t{HEADING_MARKER}]*•[\s\xa0]*•[\s\xa0]*•[\s\xa0{HEADING_MARKER}]*Supplementary Material[^\n]*$"
     )
-    
+
     parts = sm_separator.split(text, maxsplit=1)
-    
+
     # Process the Main Rule text
-    main_text = parts[0]
+    main_text  = parts[0]
     all_clauses = split_text_block(main_text, rule_id, is_sm=False)
-    
+
     # If Supplementary Material was found, process it and append
     if len(parts) > 1:
-        sm_text = parts[1]
+        sm_text    = parts[1]
         sm_clauses = split_text_block(sm_text, rule_id, is_sm=True)
         all_clauses.extend(sm_clauses)
-        
+
     return all_clauses
+
 
 def should_merge_upward(raw_text: str, clause_heading: str = "") -> bool:
     """
@@ -447,44 +496,43 @@ def should_merge_upward(raw_text: str, clause_heading: str = "") -> bool:
     merge INTO it — that is a downward concern. The clause itself may
     still be complete enough to stop upward merging.
     """
-    text = raw_text.strip()
+    # Normalize non-breaking spaces before any string checks.
+    # &nbsp; (\xa0) appears in FINRA's HTML as a word-joiner, e.g.
+    # "FINRA\xa0Rule 2010" or "records;\xa0and". The endswith() checks
+    # below use plain spaces, so without this step a clause ending with
+    # ";\xa0and" would silently pass all continuation checks and escape
+    # the upward merge it needs.
+    text = raw_text.replace("\xa0", " ").strip()
 
     if not text:
         return True
 
     # Condition 1: Pure heading with no obligation content
     if clause_heading.strip() and text == clause_heading.strip():
-        # print("cond1")
         return True
 
     # Condition 2: Too short to be a standalone obligation
     if len(text.split()) < 20:
-        # print("cond2")
         return True
 
     # Condition 3: List item — ends with semicolon or semicolon + conjunction
-    # These are properties of the original clause, not of merged text
     if text.rstrip().endswith(";"):
-        # print("cond3-1")
         return True
     if text.rstrip().endswith("; and") or text.rstrip().endswith("; or"):
-        # print("cond3-2")
         return True
 
     # Condition 4: Sentence continuation — clause is mid-sentence
     if text.rstrip().endswith(" and") or text.rstrip().endswith(" or"):
-        # print("cond4")
         return True
 
     # Condition 5: Starts mid-sentence — clearly a fragment
     if text[0].islower():
-        # print("cond5")
         return True
 
     return False
 
 
-def merge_clause_to_completion(start_ref: str, all_clauses: dict, merge_until_root = False) -> dict:
+def merge_clause_to_completion(start_ref: str, all_clauses: dict, merge_until_root=False) -> dict:
     """
     Starting from start_ref, walks upward through the ancestor chain,
     collecting nodes until it finds one whose ORIGINAL text is
@@ -499,57 +547,34 @@ def merge_clause_to_completion(start_ref: str, all_clauses: dict, merge_until_ro
     This means that trailing punctuation inherited from a child clause
     (e.g. "; and") cannot trigger a false positive on a parent whose
     original text is already complete.
-
-    Parameters
-    ──────────
-    start_ref   : clause_ref of the clause to start from
-    all_clauses : dict keyed by clause_ref, each value containing
-                  at minimum: raw_text, clause_heading, parent_clause
-
-    Returns
-    ───────
-    A copy of the start clause dict with:
-      - raw_text    : merged text from stopping ancestor down to start
-      - merged_up_to: clause_ref of the ancestor where walking stopped
     """
-
-    chain = []        # accumulates nodes from start up to stopping ancestor
+    chain = []
     current_ref = start_ref
 
     while current_ref and current_ref in all_clauses:
         node = all_clauses[current_ref]
         chain.append(node)
 
-        # ── TRAP PREVENTION ──────────────────────────────────────────────
-        # Always evaluate the ORIGINAL text from all_clauses.
-        # Never evaluate the accumulated merged text.
-        # ─────────────────────────────────────────────────────────────────
         original_text = node["raw_text"]
         heading       = node.get("clause_heading", "")
 
         if (not merge_until_root) and (not should_merge_upward(original_text, heading)):
-            # This node is complete on its own — stop walking upward
             break
 
         parent_ref = node.get("parent_clause")
         if not parent_ref or parent_ref not in all_clauses:
-            # Reached the root — stop regardless
             break
 
         current_ref = parent_ref
 
-    
-    # chain is ordered [start → parent → grandparent → stopping_ancestor]
-    # Reverse to concatenate root-first, so the most general context
-    # appears at the top of the merged text (mirrors how a human reads the rule)
     chain.reverse()
 
     merged_text = "\n".join(node["raw_text"].strip() for node in chain)
 
     result = all_clauses[start_ref].copy()
     result["raw_text"]     = merged_text
-    result["clause_ref"]   = start_ref                # preserves original identity
-    result["merged_up_to"] = chain[0]["clause_ref"]   # root of the merge chain
+    result["clause_ref"]   = start_ref
+    result["merged_up_to"] = chain[0]["clause_ref"]
 
     return result
 
@@ -558,36 +583,19 @@ def build_merged_clause_set(all_clauses: dict) -> dict:
     """
     Applies merge_clause_to_completion to every clause in all_clauses
     and returns a new dict of merged clauses keyed by clause_ref.
-    The raw_text of each clause in the output is the merged text from its stopping ancestor down to itself.
-    The stopping ancestor is the nearest ancestor (including itself) whose original text is self-complete enough to stop the merge walk. 
-    This ensures that each clause's raw_text is as self-contained and context-rich as possible without risking the trap of over-merging.
-    The condition to check the original text of ancestors for merge-worthiness is encapsulated in should_merge_upward, 
-    which is carefully designed to avoid false positives triggered by inherited punctuation in the merged text. 
-    Note that in should_merge_upward, all evaluations are based on the original raw_text from all_clauses, never on the accumulated merged text, which is what prevents the trap.
-
-    Clauses that are already complete are returned unchanged.
     """
     merged = {}
     for ref in all_clauses:
         merged[ref] = merge_clause_to_completion(ref, all_clauses)
     return merged
 
+
 def build_context_bundle(clause_ref: str, all_clauses: dict) -> dict:
     """
     Builds a full ancestor chain from the target clause up to the root.
-    all_clauses is a dict keyed by clause_ref for fast lookup.
-
-    The bundle is passed to the LLM for normalization context only.
-    It is never stored in ChromaDB.
-
-    Each ancestor entry contains:
-        clause_ref   : the clause identifier
-        raw_text     : the original clause text
-        parent_clause: the ancestor's own parent ref (or None if root)
-        level        : depth in the hierarchy, root = 1
     """
     ancestors = []
-    clause = all_clauses.get(clause_ref)
+    clause    = all_clauses.get(clause_ref)
     current_ref = clause.get("parent_clause")
 
     while current_ref and current_ref in all_clauses:
@@ -599,15 +607,11 @@ def build_context_bundle(clause_ref: str, all_clauses: dict) -> dict:
         })
         current_ref = ancestor.get("parent_clause")
 
-    # Currently ordered nearest → root. Reverse to get root → nearest.
     ancestors.reverse()
 
-    # Assign levels now that ancestors are in root-first order.
-    # Root is level 1. Each step deeper increments by 1.
     for i, ancestor in enumerate(ancestors):
         ancestor["level"] = i + 1
 
-    # The target clause sits one level below the immediate parent.
     target_level = len(ancestors) + 1
 
     return {
@@ -618,16 +622,10 @@ def build_context_bundle(clause_ref: str, all_clauses: dict) -> dict:
         },
     }
 
+
 # ── Bundle Formatter ──────────────────────────────────────────────────────────
 
 def format_bundle_for_prompt(bundle: dict) -> str:
-    """
-    Converts a context bundle into a single formatted string for the
-    RAW CLAUSE TEXT section of the normalisation prompt.
-
-    Ancestors are presented root-first so the LLM reads from general
-    to specific, mirroring how a compliance officer reads the rulebook.
-    """
     sections = []
 
     if bundle["ancestors"]:
@@ -668,60 +666,35 @@ def format_bundle_for_prompt(bundle: dict) -> str:
 # ── Prompt Builder ────────────────────────────────────────────────────────────
 
 def build_normalisation_prompt(
-    target:    dict,
-    rule_id:   str,
-    rule_name: str,
-    all_clauses: dict
+    target:      dict,
+    rule_id:     str,
+    rule_name:   str,
+    all_clauses: dict,
 ) -> str:
-    """
-    Combines a context bundle with the clause normalisation prompt
-    template to produce the final string ready to send to the LLM.
+    target_clause = target.get("raw_text", "")
 
-    Parameters
-    ──────────
-    target   : dict containing the target clause's raw_text, clause_ref, and parent_clause
-    rule_id   : FINRA rule number, e.g. "3110"
-    rule_name : human-readable rule name, e.g. "Supervision"
-
-    Returns
-    ───────
-    A fully populated prompt string ready for LLM inference.
-    """
-    target_clause = target.get("raw_text", "") # This is not the merged text. It is the raw text of the target clause itself.
-    
     clause_ref = target["clause_ref"]
     parent_ref = target.get("parent_clause") or "null"
 
-    # Merging the current clause with all its ancestors to build a full clause
     context_text = merge_clause_to_completion(clause_ref, all_clauses, merge_until_root=True)
     context_text = context_text.get("raw_text", "")
-    
-    # Format the bundle into the RAW CLAUSE TEXT block
-    # raw_clause_text = format_bundle_for_prompt(bundle)
 
     return CLAUSE_NORMALISATION_PROMPT.format(
-        rule_id         = rule_id,
-        rule_name       = rule_name,
-        parent_ref      = parent_ref,
-        clause_ref      = clause_ref,
-        target_clause   = target_clause,
+        rule_id       = rule_id,
+        rule_name     = rule_name,
+        parent_ref    = parent_ref,
+        clause_ref    = clause_ref,
+        target_clause = target_clause,
         context_text  = context_text,
-        # raw_clause_text = raw_clause_text,
     )
 
+
 def _parse_tamu_content(raw) -> str:
-    """
-    Handles both cases:
-      - raw is already an openai ChatCompletion object  → direct access
-      - raw is a plain string (SSE stream)              → line-by-line parse
-    """
     import json as _json
 
-    # Already a parsed SDK object
     if hasattr(raw, "choices"):
         return raw.choices[0].message.content or ""
 
-    # Raw SSE string fallback
     for line in str(raw).split("\n"):
         line = line.strip()
         if not line.startswith("data:"):
@@ -730,7 +703,7 @@ def _parse_tamu_content(raw) -> str:
         if json_str == "[DONE]":
             continue
         try:
-            chunk = _json.loads(json_str)
+            chunk   = _json.loads(json_str)
             content = chunk["choices"][0]["delta"].get("content", "")
             if content:
                 return content
@@ -739,38 +712,48 @@ def _parse_tamu_content(raw) -> str:
 
     return ""
 
+
 # ── Model Configuration ───────────────────────────────────────────────────────
 
-# MODEL_CONFIGS = {
-#     "qwen": (
-#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-#         "/models/qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf"
-#     ),
-#     "llama": (
-#         "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
-#         "/models/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf"
-#     ),
-# }
+class _TAMUBackend:
+    """
+    Wraps the TAMU Chat API (OpenAI-compatible) so it presents the same
+    .create_chat_completion(messages, temperature, max_tokens) interface
+    as llama_cpp.Llama — no changes needed in normalize_clause.
+    """
+    def __init__(self):
+        from openai import OpenAI
+        self._client = OpenAI(
+            api_key  = TAMU_CONFIG["api_key"],
+            base_url = TAMU_CONFIG["base_url"],
+        )
+        self._model = TAMU_CONFIG["model"]
+
+    def create_chat_completion(
+        self,
+        messages:    list[dict],
+        temperature: float = 0.0,
+        max_tokens:  int   = 4096,
+    ) -> dict:
+        raw = self._client.chat.completions.create(
+            model       = self._model,
+            messages    = messages,
+            temperature = temperature,
+            max_tokens  = max_tokens,
+        )
+        content = _parse_tamu_content(raw)
+        return {"choices": [{"message": {"content": content}}]}
 
 
 def load_normalizer_model(model_name: str = "qwen"):
     """
     Returns a backend instance — either a local Llama or a _TAMUBackend —
     depending on INFERENCE_BACKEND in settings.py.
-
-    Both expose the same create_chat_completion() interface so
-    normalize_clause and run_normalization_pipeline are backend-agnostic.
-
-    Parameters
-    ----------
-    model_name : only used when INFERENCE_BACKEND == "local"
-                 ("qwen" or "llama", matched against MODEL_CONFIGS)
     """
     if model_name == "tamu" or INFERENCE_BACKEND == "tamu":
         print(f"  Using TAMU inference backend: {TAMU_CONFIG['model']}")
         return _TAMUBackend()
 
-    # ── Local GGUF inference (original behaviour) ─────────────────────────
     if model_name not in MODEL_CONFIGS:
         raise ValueError(
             f"Unknown model '{model_name}'. "
@@ -790,16 +773,13 @@ def load_normalizer_model(model_name: str = "qwen"):
 # ── Step 3: LLM Normalisation ─────────────────────────────────────────────────
 
 def normalize_clause(
-    model,           # Llama | _TAMUBackend — both have create_chat_completion()
+    model,
     prompt:      str,
     max_retries: int = 3,
 ) -> dict | None:
     """
     Calls whichever backend is loaded (local Llama or TAMU API) and
     returns the structured JSON dict the model produces.
-
-    Strips <think>...</think> blocks, markdown fences, then parses JSON.
-    Retries up to max_retries times before returning None.
     """
     import re as _re
 
@@ -832,18 +812,11 @@ def normalize_clause(
 
     return None
 
+
 # ── Step 4: Document Assembly ─────────────────────────────────────────────────
 
 def _safe_str(value) -> str:
-    """
-    Converts a value to a ChromaDB-safe string.
-
-    ChromaDB metadata fields accept only str, int, float, or bool.
-    This helper converts:
-        None  → ""          (ChromaDB rejects None)
-        list  → ", ".join   (ChromaDB rejects lists)
-        other → str(value)
-    """
+    """Converts a value to a ChromaDB-safe string."""
     if value is None:
         return ""
     if isinstance(value, list):
@@ -860,38 +833,13 @@ def assemble_document(
     """
     Merges raw clause fields, merged clause text, rule metadata, and
     LLM-normalised fields into a single flat document ready for ChromaDB.
-
-    The TEXT USED FOR EMBEDDING is the merged_clause raw_text, not the
-    raw clause text. The merged text is self-contained — it includes the
-    governing obligation context — which produces more accurate semantic
-    similarity scores at retrieval time.
-
-    All metadata values are converted to ChromaDB-safe types via
-    _safe_str and explicit bool() casts. No None values or lists are
-    passed to ChromaDB.
-
-    Parameters
-    ----------
-    raw_clause    : original clause dict from parse_finra_rule
-    merged_clause : merged clause dict from build_merged_clause_set
-    rule_meta     : entry from TARGET_RULES (rule_id, name, category, url)
-    normalized    : LLM output dict from normalize_clause
-
-    Returns
-    -------
-    Flat dict with keys:
-        id        — ChromaDB document ID (= clause_ref)
-        document  — text for embedding (merged clause text)
-        all other keys — ChromaDB metadata fields
     """
     merged_text = merged_clause.get("raw_text") or raw_clause.get("raw_text", "")
 
     return {
-        # ── ChromaDB identity and embedding text ──────────────────────────
-        "id":       _safe_str(uuid.uuid4()), # raw_clause["clause_ref"],
+        "id":       _safe_str(uuid.uuid4()),
         "document": merged_text,
 
-        # ── Provenance ────────────────────────────────────────────────────
         "clause_ref":     raw_clause["clause_ref"],
         "parent_clause":  _safe_str(raw_clause.get("parent_clause")),
         "clause_heading": _safe_str(raw_clause.get("clause_heading")),
@@ -902,8 +850,6 @@ def assemble_document(
         "rule_name":      rule_meta["name"],
         "regulator":      "FINRA",
 
-        # ── Normalised fields (LLM output) ────────────────────────────────
-        # String fields — use _safe_str to guard against None
         "category":             _safe_str(normalized.get("category")),
         "obligated_actor":      _safe_str(normalized.get("obligated_actor")),
         "regulated_subject":    _safe_str(normalized.get("regulated_subject")),
@@ -911,30 +857,18 @@ def assemble_document(
         "frequency":            _safe_str(normalized.get("frequency")),
         "reporting_recipient":  _safe_str(normalized.get("reporting_recipient")),
 
-        # List fields — stored as comma-joined strings for ChromaDB
-        # Use $contains logic in Python post-retrieval when filtering
         "applies_to_firm_type": _safe_str(normalized.get("applies_to_firm_type")),
         "subject_matter":       _safe_str(normalized.get("subject_matter")),
         "keywords":             _safe_str(normalized.get("keywords")),
 
-        # Boolean fields — explicit bool() cast guards against LLM
-        # returning 0/1 or "true"/"false" strings
-        "involves_customer":      bool(normalized.get("involves_customer",      False)),
-        "involves_third_party":   bool(normalized.get("involves_third_party",   False)),
+        "involves_customer":       bool(normalized.get("involves_customer",       False)),
+        "involves_third_party":    bool(normalized.get("involves_third_party",    False)),
         "has_financial_threshold": bool(normalized.get("has_financial_threshold", False)),
-        "documentation_required": bool(normalized.get("documentation_required", False)),
+        "documentation_required":  bool(normalized.get("documentation_required",  False)),
     }
 
 
 # ── Steps 1 & 2: Scraping Pipeline ───────────────────────────────────────────
-
-# PARSED_CHECKPOINT    = Path("data/parsed_rules.json")
-# BASE_DIR = Path(__file__).resolve().parent.parent
-# PARSED_CHECKPOINT = BASE_DIR / "data" / "parsed_rules.json"
-
-# NORMALIZED_CHECKPOINT = Path("data/normalized_documents.jsonl")
-# NORMALIZED_CHECKPOINT = BASE_DIR / "data" / "normalized_documents.jsonl"
-
 
 def run_scraping_pipeline() -> dict:
     """
@@ -943,15 +877,6 @@ def run_scraping_pipeline() -> dict:
 
     Saves a checkpoint to PARSED_CHECKPOINT after all rules are processed.
     This checkpoint is the input to run_normalization_pipeline.
-
-    Returns
-    -------
-    Dict keyed by rule_id:
-        {
-            "meta":    {rule_id, name, category, url},
-            "clauses": {clause_ref: raw_clause_dict, ...},
-            "merged":  {clause_ref: merged_clause_dict, ...},
-        }
     """
     PARSED_CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
 
@@ -961,7 +886,7 @@ def run_scraping_pipeline() -> dict:
         rule_id = rule["rule_id"]
         print(f"\n  Rule {rule_id}: {rule['name']}")
 
-        raw_text = scrape_rule_page(rule_id)   # now takes rule_id not url
+        raw_text = scrape_rule_page(rule_id)
         if not raw_text:
             print(f"    ✗ Skipping — no content retrieved")
             continue
@@ -994,17 +919,16 @@ def run_scraping_pipeline() -> dict:
 # ── Step 3: Normalisation Pipeline ───────────────────────────────────────────
 
 def run_normalization_pipeline(
-    model,          # Llama | _TAMUBackend
+    model,
     all_rules: dict,
 ) -> list[dict]:
     """
     Normalises every clause in all_rules using whichever backend `model`
-    wraps. Everything else — checkpointing, resume support, progress
-    logging — is identical to the original.
+    wraps. Supports resume: already-normalised clause_refs are skipped.
     """
     NORMALIZED_CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
 
-    processed_refs: set[str]  = set()
+    processed_refs: set[str]   = set()
     existing_docs:  list[dict] = []
 
     if NORMALIZED_CHECKPOINT.exists():
@@ -1018,7 +942,6 @@ def run_normalization_pipeline(
         if processed_refs:
             print(f"  Resuming: {len(processed_refs)} clauses already normalised")
 
-    all_rules = {key:val for key, val in all_rules.items() if key in {"2010", "2020"}}  # filter out rules with no clauses
     total     = sum(len(r["clauses"]) for r in all_rules.values())
     remaining = total - len(processed_refs)
     print(f"  Total clauses: {total}  |  Already done: {len(processed_refs)}  "
@@ -1067,7 +990,7 @@ def run_normalization_pipeline(
                     normalized    = normalized,
                 )
 
-                out_f.write(json.dumps(doc, indent = 4) + "\n")
+                out_f.write(json.dumps(doc, indent=4) + "\n")
                 out_f.flush()
                 new_docs.append(doc)
                 print("✓")
