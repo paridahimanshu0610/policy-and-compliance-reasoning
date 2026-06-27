@@ -20,8 +20,67 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 from llama_cpp import Llama
 import uuid
-from config.settings import TARGET_RULES, SCRAPER_HEADERS, PARSED_CHECKPOINT, NORMALIZED_CHECKPOINT, MODEL_CONFIGS, HTML_DIR, SERIES_MAP, INFERENCE_BACKEND, TAMU_CONFIG
+from collections import Counter
+from typing import Any, IO
+from config.settings import TARGET_RULES, PARSED_CHECKPOINT, DATA_DIR, MODEL_CONFIGS, HTML_DIR, SERIES_MAP, INFERENCE_BACKEND, TAMU_CONFIG
 from config.prompts  import CLAUSE_NORMALISATION_PROMPT
+
+
+def aggregate_json_objects(objects: list[dict]) -> dict:
+    if not objects:
+        return {}
+
+    def normalize(value):
+        return None if value == "null" else value
+
+    def majority_or_list(values: list) -> Any:
+        values = [normalize(v) for v in values]
+        non_none = [v for v in values if v is not None]
+        none_count = len(values) - len(non_none)
+        if not non_none:
+            return None
+        counter = Counter(non_none)
+        max_count = max(counter.values())
+        total = len(values)
+        if none_count > max_count:
+            return None
+        top_values = [v for v, c in counter.items() if c == max_count]
+        if len(top_values) == 1 and max_count > total / 2:
+            return top_values[0]
+        result = sorted(top_values)
+        if none_count == max_count:
+            result = [None] + result
+        return result
+
+    def majority_bool(values: list[bool]) -> bool:
+        true_count = sum(1 for v in values if v is True)
+        false_count = sum(1 for v in values if v is False)
+        return True if true_count >= false_count else False
+
+    def aggregate_list_field(list_of_lists: list[list]) -> Any:
+        flat = [normalize(item) for sublist in list_of_lists for item in (sublist or [])]
+        if not flat:
+            return []
+        counter = Counter(flat)
+        total_lists = len(list_of_lists)
+        max_count = max(counter.values())
+        top_values = [v for v, c in counter.items() if c == max_count]
+        if len(top_values) == 1 and max_count > total_lists / 2:
+            return [top_values[0]]
+        return sorted(top_values)
+
+    scalar_fields = ["obligated_actor", "regulated_subject", "activity_type", "frequency", "reporting_recipient"]
+    bool_fields = ["involves_customer", "involves_third_party", "has_financial_threshold", "documentation_required"]
+    list_fields = ["applies_to_firm_type"]
+
+    result = {}
+    for field in scalar_fields:
+        result[field] = majority_or_list([obj.get(field) for obj in objects])
+    for field in bool_fields:
+        result[field] = majority_bool([obj.get(field) for obj in objects])
+    for field in list_fields:
+        result[field] = aggregate_list_field([obj.get(field) or [] for obj in objects])
+    return result
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -690,11 +749,11 @@ def build_normalisation_prompt(
 
 
 def _parse_tamu_content(raw) -> str:
-    import json as _json
-
+    # Already a parsed SDK object
     if hasattr(raw, "choices"):
         return raw.choices[0].message.content or ""
 
+    # Raw SSE string fallback
     for line in str(raw).split("\n"):
         line = line.strip()
         if not line.startswith("data:"):
@@ -703,11 +762,11 @@ def _parse_tamu_content(raw) -> str:
         if json_str == "[DONE]":
             continue
         try:
-            chunk   = _json.loads(json_str)
+            chunk = json.loads(json_str)
             content = chunk["choices"][0]["delta"].get("content", "")
             if content:
                 return content
-        except (KeyError, IndexError, _json.JSONDecodeError):
+        except (KeyError, IndexError, json.JSONDecodeError):
             continue
 
     return ""
@@ -721,28 +780,50 @@ class _TAMUBackend:
     .create_chat_completion(messages, temperature, max_tokens) interface
     as llama_cpp.Llama — no changes needed in normalize_clause.
     """
-    def __init__(self):
+    def __init__(self, model_name = TAMU_CONFIG["model"]):
         from openai import OpenAI
         self._client = OpenAI(
             api_key  = TAMU_CONFIG["api_key"],
             base_url = TAMU_CONFIG["base_url"],
         )
-        self._model = TAMU_CONFIG["model"]
+        self._model = model_name
 
     def create_chat_completion(
         self,
         messages:    list[dict],
         temperature: float = 0.0,
-        max_tokens:  int   = 4096,
+        top_p:      float = 1.0,
+        frequency_penalty: float = 0.0,
+        presence_penalty:  float = 0.0,
+        max_tokens:  int   = 16384,
     ) -> dict:
-        raw = self._client.chat.completions.create(
-            model       = self._model,
-            messages    = messages,
-            temperature = temperature,
-            max_tokens  = max_tokens,
-        )
+        """Returns a dict shaped like llama_cpp's chat completion output."""
+
+        if self._model == "protected.Claude Opus 4.7": 
+            raw = self._client.chat.completions.create(
+                model       = self._model,
+                messages    = messages,
+                max_tokens  = max_tokens,
+            )
+        else:
+            raw = self._client.chat.completions.create(
+                model       = self._model,
+                messages    = messages,
+                temperature = temperature,
+                top_p = 1.0, 
+                frequency_penalty = 0.0,
+                presence_penalty = 0.0,
+                max_tokens  = max_tokens,
+            )
+
+        # Parse the raw SSE/response string if it comes back as text
         content = _parse_tamu_content(raw)
-        return {"choices": [{"message": {"content": content}}]}
+        # Re-wrap into llama_cpp-compatible shape
+        return {
+            "choices": [
+                {"message": {"content": content}}
+            ]
+        }
 
 
 def load_normalizer_model(model_name: str = "qwen"):
@@ -750,9 +831,9 @@ def load_normalizer_model(model_name: str = "qwen"):
     Returns a backend instance — either a local Llama or a _TAMUBackend —
     depending on INFERENCE_BACKEND in settings.py.
     """
-    if model_name == "tamu" or INFERENCE_BACKEND == "tamu":
-        print(f"  Using TAMU inference backend: {TAMU_CONFIG['model']}")
-        return _TAMUBackend()
+    if INFERENCE_BACKEND == "tamu":
+        print(f"  Using TAMU inference backend: {model_name}")
+        return _TAMUBackend(model_name=model_name)
 
     if model_name not in MODEL_CONFIGS:
         raise ValueError(
@@ -777,11 +858,6 @@ def normalize_clause(
     prompt:      str,
     max_retries: int = 3,
 ) -> dict | None:
-    """
-    Calls whichever backend is loaded (local Llama or TAMU API) and
-    returns the structured JSON dict the model produces.
-    """
-    import re as _re
 
     messages = [{"role": "user", "content": prompt}]
 
@@ -790,13 +866,38 @@ def normalize_clause(
             response = model.create_chat_completion(
                 messages    = messages,
                 temperature = 0.0,
-                max_tokens  = 4096,
+                max_tokens  = 16384,
             )
             raw = response["choices"][0]["message"]["content"].strip()
 
-            raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL).strip()
-            raw = _re.sub(r"^```(?:json)?\s*", "", raw)
-            raw = _re.sub(r"\s*```$",           "", raw)
+            # Guard: empty response
+            if not raw:
+                print(f"    ✗ Empty response (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(1)
+                continue
+
+            # Strip <think>...</think> blocks (Gemini 2.5 Pro)
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+            # Guard: response was only a <think> block — likely truncated mid-think
+            if not raw:
+                print(f"    ✗ Response was only a <think> block — likely truncated (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(1)
+                continue
+
+            # Strip markdown code fences
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$",           "", raw)
+            raw = raw.strip()
+
+            # Guard: truncated JSON (valid JSON must end with } or ])
+            if not raw.rstrip().endswith(('}', ']')):
+                print(f"    ✗ Response appears truncated — doesn't end with '}}' or ']' (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(1)
+                continue
 
             return json.loads(raw)
 
@@ -850,7 +951,6 @@ def assemble_document(
         "rule_name":      rule_meta["name"],
         "regulator":      "FINRA",
 
-        "category":             _safe_str(normalized.get("category")),
         "obligated_actor":      _safe_str(normalized.get("obligated_actor")),
         "regulated_subject":    _safe_str(normalized.get("regulated_subject")),
         "activity_type":        _safe_str(normalized.get("activity_type")),
@@ -858,8 +958,6 @@ def assemble_document(
         "reporting_recipient":  _safe_str(normalized.get("reporting_recipient")),
 
         "applies_to_firm_type": _safe_str(normalized.get("applies_to_firm_type")),
-        "subject_matter":       _safe_str(normalized.get("subject_matter")),
-        "keywords":             _safe_str(normalized.get("keywords")),
 
         "involves_customer":       bool(normalized.get("involves_customer",       False)),
         "involves_third_party":    bool(normalized.get("involves_third_party",    False)),
@@ -919,54 +1017,91 @@ def run_scraping_pipeline() -> dict:
 # ── Step 3: Normalisation Pipeline ───────────────────────────────────────────
 
 def run_normalization_pipeline(
-    model,
+    models: list[_TAMUBackend],
     all_rules: dict,
-) -> list[dict]:
+) -> dict[str, list[dict]]:
     """
-    Normalises every clause in all_rules using whichever backend `model`
-    wraps. Supports resume: already-normalised clause_refs are skipped.
+    Normalises every clause in all_rules using each backend model in `models`.
+    Iterates rule-by-rule; for each clause, runs all models before moving on.
+    Supports resume: already-normalised clause_refs per model are skipped.
+    A 20s gap is inserted between successive normalize_clause calls.
     """
-    NORMALIZED_CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
 
-    processed_refs: set[str]   = set()
-    existing_docs:  list[dict] = []
+    # ------------------------------------------------------------------ #
+    # 1. Build per-model checkpoint paths & resume state                  #
+    # ------------------------------------------------------------------ #
+    def checkpoint_for(model_name: str) -> Path:
+        safe_name = model_name.replace("protected.", "")
+        return DATA_DIR / f"normalized_{safe_name}.jsonl"
 
-    if NORMALIZED_CHECKPOINT.exists():
-        with open(NORMALIZED_CHECKPOINT, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    doc = json.loads(line)
-                    processed_refs.add(doc["clause_ref"])
-                    existing_docs.append(doc)
-        if processed_refs:
-            print(f"  Resuming: {len(processed_refs)} clauses already normalised")
+    model_state: dict[str, dict] = {}
 
-    total     = sum(len(r["clauses"]) for r in all_rules.values())
-    remaining = total - len(processed_refs)
-    print(f"  Total clauses: {total}  |  Already done: {len(processed_refs)}  "
-          f"|  Remaining: {remaining}")
+    for model in models:
+        model_name = model._model  # extract string name from instance
+        ckpt = checkpoint_for(model_name)
+        ckpt.parent.mkdir(parents=True, exist_ok=True)
 
-    if remaining == 0:
-        print("  ✓ All clauses already normalised.")
-        return existing_docs
+        processed_refs: set[str]   = set()
+        existing_docs:  list[dict] = []
 
-    new_docs:   list[dict] = []
-    skipped:    list[str]  = []
-    done_count: int        = len(processed_refs)
+        if ckpt.exists():
+            with open(ckpt, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        doc = json.loads(line)
+                        processed_refs.add(doc["clause_ref"])
+                        existing_docs.append(doc)
+            if processed_refs:
+                print(f"  [{model_name}] Resuming: {len(processed_refs)} clauses already normalised")
 
-    with open(NORMALIZED_CHECKPOINT, "a") as out_f:
+        total     = sum(len(r["clauses"]) for r in all_rules.values())
+        remaining = total - len(processed_refs)
+        print(
+            f"  [{model_name}] Total clauses: {total}  |  "
+            f"Already done: {len(processed_refs)}  |  Remaining: {remaining}"
+        )
+
+        model_state[model_name] = {
+            "instance":       model,        # _TAMUBackend instance for normalize_clause
+            "ckpt":           ckpt,
+            "processed_refs": processed_refs,
+            "existing_docs":  existing_docs,
+            "new_docs":       [],
+            "skipped":        [],
+            "done_count":     len(processed_refs),
+            "total":          total,
+            "remaining":      remaining,
+        }
+
+    # ------------------------------------------------------------------ #
+    # 2. Open one output file handle per model                            #
+    # ------------------------------------------------------------------ #
+    out_handles: dict[str, IO] = {
+        model_name: open(state["ckpt"], "a")
+        for model_name, state in model_state.items()
+    }
+
+    try:
+        # -------------------------------------------------------------- #
+        # 3. Outer loop: rule → clause  (preserve original iteration order)
+        # -------------------------------------------------------------- #
+        first_call = True
+
         for rule_id, rule_data in all_rules.items():
             rule_meta    = rule_data["meta"]
             clauses_dict = rule_data["clauses"]
             merged_dict  = rule_data["merged"]
 
             for clause_ref, raw_clause in clauses_dict.items():
-                if clause_ref in processed_refs:
-                    continue
 
-                done_count += 1
-                print(f"  [{done_count}/{total}] {clause_ref} ...", end=" ", flush=True)
+                # Determine which models still need this clause
+                pending_model_names = [
+                    model_name for model_name, state in model_state.items()
+                    if clause_ref not in state["processed_refs"]
+                ]
+                if not pending_model_names:
+                    continue
 
                 prompt = build_normalisation_prompt(
                     target      = raw_clause,
@@ -975,36 +1110,73 @@ def run_normalization_pipeline(
                     all_clauses = clauses_dict,
                 )
 
-                normalized = normalize_clause(model, prompt)
+                # -------------------------------------------------------- #
+                # 4. Inner loop: run each pending model for this clause     #
+                # -------------------------------------------------------- #
+                for model_name in pending_model_names:
+                    state = model_state[model_name]
 
-                if normalized is None:
-                    print("✗ skipped (normalisation failed after retries)")
-                    skipped.append(clause_ref)
-                    continue
+                    if not first_call:
+                        print(f"    Waiting 20s before next call...", flush=True)
+                        time.sleep(20)
+                    first_call = False
 
-                merged_clause = merged_dict.get(clause_ref, raw_clause)
-                doc = assemble_document(
-                    raw_clause    = raw_clause,
-                    merged_clause = merged_clause,
-                    rule_meta     = rule_meta,
-                    normalized    = normalized,
-                )
+                    state["done_count"] += 1
+                    print(
+                        f"  [{model_name}] [{state['done_count']}/{state['total']}] "
+                        f"{clause_ref} ...",
+                        end="\n", flush=True,
+                    )
 
-                out_f.write(json.dumps(doc, indent=4) + "\n")
-                out_f.flush()
-                new_docs.append(doc)
-                print("✓")
+                    normalized = normalize_clause(state["instance"], prompt)  # pass instance
 
-    print(f"\n  ✓ Normalisation run complete.")
-    print(f"    Newly normalised : {len(new_docs)}")
-    print(f"    Skipped (failed) : {len(skipped)}")
-    if skipped:
-        print("    Failed refs:")
-        for ref in skipped:
-            print(f"      {ref}")
-    print(f"  ✓ Checkpoint updated → {NORMALIZED_CHECKPOINT}")
+                    if normalized is None:
+                        print("✗ skipped (normalisation failed after retries)")
+                        state["skipped"].append(clause_ref)
+                        continue
 
-    return existing_docs + new_docs
+                    merged_clause = merged_dict.get(clause_ref, raw_clause)
+                    doc = assemble_document(
+                        raw_clause    = raw_clause,
+                        merged_clause = merged_clause,
+                        rule_meta     = rule_meta,
+                        normalized    = normalized,
+                    )
+
+                    out_handles[model_name].write(json.dumps(doc, ensure_ascii=False) + "\n")
+                    out_handles[model_name].flush()
+                    state["new_docs"].append(doc)
+                    print(f"✓ normalised and saved {clause_ref} for {model_name}")
+
+    finally:
+        for fh in out_handles.values():
+            fh.close()
+
+    # ------------------------------------------------------------------ #
+    # 5. Summary & return                                                  #
+    # ------------------------------------------------------------------ #
+    results: dict[str, list[dict]] = {}
+
+    for model_name, state in model_state.items():
+        print(f"\n  ✓ [{model_name}] Normalisation run complete.")
+        print(f"    Newly normalised : {len(state['new_docs'])}")
+        print(f"    Skipped (failed) : {len(state['skipped'])}")
+        if state["skipped"]:
+            print("    Failed refs:")
+            for ref in state["skipped"]:
+                print(f"      {ref}")
+        print(f"  ✓ Checkpoint updated → {state['ckpt']}")
+
+        results[model_name] = state["existing_docs"] + state["new_docs"]
+
+    return results
 
 if __name__ == "__main__":
-    run_scraping_pipeline()
+    with open(PARSED_CHECKPOINT) as f:
+        all_rules = json.load(f)
+
+    all_rules = {k: v for k, v in all_rules.items() if k not in {"4210", "4220", "4230", "4240", "4311", "4314", "4320", "4330", "4340", "4360", "4370", "4380"}}
+    models     = [load_normalizer_model(model_name) for model_name in ["protected.o3", "protected.Claude Opus 4.7", "protected.gpt-5", "protected.gemini-2.5-pro"]]
+    print(f"\n  ✓ Loaded {len(models)} normaliser models: {[m._model for m in models]}")
+    print(f"  ✓ Running normalisation pipeline on {len(all_rules)} rules: {all_rules.keys()}")
+    documents = run_normalization_pipeline(models, all_rules)
