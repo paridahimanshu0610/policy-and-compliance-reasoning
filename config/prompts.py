@@ -493,8 +493,7 @@ INPUTS YOU WILL RECEIVE
 - RULE NAME       : The name of the rule (e.g. Supervision)
 - PARENT REF      : The parent clause reference, or null if top-level
 - CLAUSE REF      : The specific clause identifier (e.g. FINRA-3110(c)(1)(A))
-- TARGET CLAUSE   : The specific clause you must structure. Use exact or
-                    near-exact language from this text for keywords.
+- TARGET CLAUSE   : The specific clause you must structure.
 - FULL RULE TEXT  : The complete rule text provided for context.
                     Read this alongside the TARGET CLAUSE to fully
                     understand the meaning and intent of what you
@@ -503,111 +502,10 @@ INPUTS YOU WILL RECEIVE
 SCHEMA TO POPULATE
 ==================
 {{
-    "category": "",
-    // Top-level regulatory domain. Choose exactly ONE value.
-    //
-    // ALLOWED VALUES AND WHEN TO USE THEM:
-    //
-    // "duties_and_conduct"           → clause governs general standards of
-    //                                  commercial honor, fraud prohibition,
-    //                                  or fiduciary information use
-    //                                  (rules 2010, 2020, 2060)
-    //
-    // "government_distribution"      → clause governs distribution or
-    //                                  solicitation activities involving
-    //                                  government entities, or pay-to-play
-    //                                  contribution restrictions
-    //                                  (rule 2030)
-    //
-    // "payments_and_compensation"    → clause governs payments to
-    //                                  unregistered persons, compensation
-    //                                  arrangements, or finder payments
-    //                                  (rule 2040)
-    //
-    // "conflicts_with_regulators"    → clause governs obligations when
-    //                                  dealing with FINRA employees,
-    //                                  including account statements,
-    //                                  loans, or gifts
-    //                                  (rule 2070)
-    //
-    // "expungement"                  → clause governs expungement of
-    //                                  information from the CRD system,
-    //                                  including court orders, arbitral
-    //                                  findings, and prohibited conditions
-    //                                  on expungement
-    //                                  (rules 2080, 2081)
-    //
-    // "know_your_customer"           → clause governs obligations to know
-    //                                  essential facts about customers and
-    //                                  their accounts
-    //                                  (rule 2090)
-    //
-    // "supervision"                  → clause governs supervisory systems,
-    //                                  supervisory control, annual
-    //                                  certification, mail holding,
-    //                                  networking arrangements, or tape
-    //                                  recording
-    //                                  (rules 3110, 3120, 3130, 3150,
-    //                                   3160, 3170)
-    //
-    // "associated_person_conduct"    → clause restricts or governs what a
-    //                                  registered or associated person may
-    //                                  do, including outside accounts,
-    //                                  gifts, borrowing, outside business,
-    //                                  private securities transactions,
-    //                                  discretionary trading, or account
-    //                                  designation
-    //                                  (rules 3210, 3220, 3230, 3240,
-    //                                   3241, 3250, 3260, 3270, 3280)
-    //
-    // "AML"                          → clause governs anti-money laundering
-    //                                  program requirements
-    //                                  (rule 3310)
-    //
-    // "margin"                       → clause governs margin calculations,
-    //                                  margin accounts, margin records,
-    //                                  extension requests, or swap margin
-    //                                  requirements
-    //                                  (rules 4210, 4220, 4230, 4240)
-    //
-    // "operations"                   → clause governs carrying agreements,
-    //                                  securities lending, short sale
-    //                                  delivery, customer asset protection,
-    //                                  callable securities allocation,
-    //                                  fidelity bonds, business continuity,
-    //                                  or BC/DR testing
-    //                                  (rules 4311, 4314, 4320, 4330,
-    //                                   4340, 4360, 4370, 4380)
-    //
-    // HOW TO DECIDE: Use the rule ID to narrow down the domain.
-    // Then confirm by checking the activity_type you identified.
-
     "obligated_actor": "",
     // The party who must comply with this clause.
-    // Choose exactly ONE value from this list:
-    //
-    // "member"
-    // "associated_person"
-    // "registered_person"
-    // "registered_representative"
-    // "registered_principal"
-    // "supervisory_personnel"
-    // "CEO"
-    // "CCO"
-    // "CFO"
-    // "financial_operations_principal"
-    // "senior_management"
-    // "carrying_firm"
-    // "introducing_firm"
-    // "clearing_agency_participant"
-    // "other"
-    //
     // HOW TO DECIDE: Find the party who is explicitly required
-    // to DO something under the governing obligation of this
-    // clause. Look for the subject of an obligation sentence
-    // (e.g. "each member shall", "the carrying firm must",
-    // "the registered representative is required to").
-    //
+    // to DO something under the governing obligation of this clause.
     // IMPORTANT — Do not confuse a role or entity that appears
     // in a descriptive or qualifying phrase with the obligated
     // actor. For example, "the person associated with the
@@ -615,7 +513,80 @@ SCHEMA TO POPULATE
     // associated with the member has control" is describing a
     // relationship, not bearing an obligation. The obligated
     // actor must be the party explicitly required to DO
-    // something, not a party mentioned in passing.
+    // something, not a party mentioned in passing. 
+    // Choose exactly ONE value from this list:
+    //
+    // "member"                        → use when the obligation's
+    //                                   subject is "member" or
+    //                                   "broker-dealer" generally,
+    //                                   with no carrying/introducing
+    //                                   distinction stated
+    // "associated_person"             → use when the subject is any
+    //                                   person associated with a
+    //                                   member, and the clause does
+    //                                   NOT specify a registration
+    //                                   category (representative,
+    //                                   principal) for that person
+    // "registered_person"             → use when the subject is
+    //                                   explicitly described as
+    //                                   "registered" but no specific
+    //                                   registration category
+    //                                   (representative vs principal)
+    //                                   is stated
+    // "registered_representative"     → use when the subject is
+    //                                   explicitly identified as a
+    //                                   registered representative
+    // "registered_principal"          → use when the subject is
+    //                                   explicitly identified as a
+    //                                   registered principal
+    // "supervisory_personnel"         → use when the subject is
+    //                                   identified by a supervisory
+    //                                   role or title (e.g.
+    //                                   "designated supervisor",
+    //                                   "OSJ manager") rather than by
+    //                                   registration category
+    // "CEO"                           → use when the subject is
+    //                                   explicitly the Chief
+    //                                   Executive Officer (or
+    //                                   equivalent officer) by title
+    // "CCO"                           → use when the subject is
+    //                                   explicitly the Chief
+    //                                   Compliance Officer by title
+    // "CFO"                           → use when the subject is
+    //                                   explicitly the Chief
+    //                                   Financial Officer by title
+    // "financial_operations_principal" → use when the subject is
+    //                                   explicitly the Financial and
+    //                                   Operations Principal by title
+    // "senior_management"             → use when the subject is a
+    //                                   firm's leadership collectively
+    //                                   (e.g. "senior management") with
+    //                                   no single officer title named
+    // "carrying_firm"                 → use ONLY when the clause text
+    //                                   itself uses the term "carrying
+    //                                   firm" (or "carrying broker-
+    //                                   dealer") as the subject — not
+    //                                   merely implied by context
+    // "introducing_firm"              → use ONLY when the clause text
+    //                                   itself uses the term
+    //                                   "introducing firm" (or
+    //                                   "introducing broker-dealer")
+    //                                   as the subject — not merely
+    //                                   implied by context
+    // "clearing_agency_participant"   → use when the subject is
+    //                                   explicitly a participant of a
+    //                                   registered clearing agency
+    // "other"                         → use when a governing
+    //                                   obligation exists but its
+    //                                   subject does not match any
+    //                                   value above
+    // "null"                          → use ONLY when no modal
+    //                                   obligation verb exists in the
+    //                                   clause or anywhere in its
+    //                                   ancestor chain — i.e. the
+    //                                   clause is purely definitional
+    //                                   or descriptive with no
+    //                                   obligation attached at any level
     //
     // Use "carrying_firm" or "introducing_firm" when the clause
     // explicitly names one of these roles as the party bearing
@@ -623,47 +594,136 @@ SCHEMA TO POPULATE
     // when the obligation applies to member firms generally
     // without distinguishing role.
     //
-    // Always be as specific as possible. Use "other" only if
-    // the obligated party is clearly not one of the listed roles.
+    // Always be as specific as possible.
+    // Use "other" only if an obligation clearly exists but the
+    // obligated party does not match any listed role.
+    // Use "null" only if the clause imposes no obligation at all
+    // and no party is required to DO anything.
 
     "regulated_subject": "",
-    // The entity or object that the obligation is about.
+    // The entity or object that the clause is about — whether the
+    // clause imposes an obligation, sets a definition, or states
+    // a scope/eligibility condition.
+    // HOW TO DECIDE: Identify the central object or entity that the
+    // clause's obligation, definition, or scoping language acts upon.
+    // Ask — what is being created, restricted, reviewed, protected,
+    // measured, or defined HERE? The answer is the regulated_subject.
+    // Ignore objects that appear only as side effects, downstream
+    // consequences, or incidental references — the regulated_subject
+    // must be what the clause is directly and primarily about.
     // Choose exactly ONE value from this list:
     //
-    // "associated_person"
-    // "associated_person_account"
-    // "registered_person"
-    // "customer"
-    // "customer_account"
-    // "customer_securities"
-    // "member_firm"
-    // "supervisory_personnel"
-    // "OSJ"
-    // "branch_office"
-    // "non_branch_location"
-    // "written_procedures"
-    // "communication"
-    // "transaction"
-    // "recommendation"
-    // "capital_position"
-    // "margin_account"
-    // "security_position"
-    // "short_position"
-    // "government_securities"
-    // "swap_position"
-    // "carrying_agreement"
-    // "business_continuity_plan"
-    // "fidelity_bond"
-    // "payment_or_gratuity"
-    // "CRD_record"
-    // "books_and_records"
-    // "business_clock"
-    // "other"
-    //
-    // HOW TO DECIDE: Ask yourself — what is being supervised,
-    // restricted, reviewed, protected, or measured by the
-    // governing obligation this clause belongs to? That is the
-    // regulated_subject.
+    // "associated_person_account"  → use when the clause acts upon an
+    //                               account held by an associated
+    //                               person, particularly at a firm
+    //                               other than their employer (rule 3210)
+    // "customer_account"           → use when the clause acts upon a
+    //                               customer's account as a structure
+    //                               (opening, designation, discretionary
+    //                               authority over it)
+    // "customer_securities"        → use when the clause acts upon
+    //                               securities belonging to a customer
+    //                               specifically (lending, holding,
+    //                               protecting) rather than the account
+    //                               as a whole (rules 4330, 4340)
+    // "margin_account"             → use when the clause acts upon a
+    //                               margin account specifically,
+    //                               distinct from a customer account
+    //                               generally
+    // "short_position"             → use when the clause acts upon a
+    //                               short position specifically,
+    //                               including fail-to-deliver
+    // "government_securities"      → use when the clause acts upon
+    //                               government securities specifically
+    // "swap_position"               → use when the clause acts upon a
+    //                               security-based swap position
+    //                               specifically
+    // "carrying_agreement"         → use when the clause acts upon the
+    //                               carrying agreement document or
+    //                               arrangement itself (rule 4311)
+    // "business_continuity_plan"   → use when the clause acts upon the
+    //                               BCP document itself — its creation,
+    //                               content, or testing
+    // "fidelity_bond"              → use when the clause acts upon the
+    //                               fidelity bond coverage itself — its
+    //                               existence or amount
+    // "payment_or_gratuity"        → use when the clause acts upon a
+    //                               payment, gift, or compensation
+    //                               arrangement as the thing being
+    //                               restricted or permitted (rules
+    //                               3220, 2040)
+    // "CRD_record"                 → use when the clause acts upon
+    //                               information recorded in the CRD
+    //                               system (rules 2080, 2081)
+    // "written_procedures"         → use when the clause acts upon the
+    //                               procedures document itself (its
+    //                               existence, content, or review)
+    //                               rather than on the activity the
+    //                               procedures govern
+    // "business_clock"             → use when the clause acts upon the
+    //                               synchronization of business clocks
+    //                               used for recordkeeping
+    // "capital_position"           → use when the clause acts upon a
+    //                               firm's net capital or financial
+    //                               condition
+    // "OSJ"                        → use when the clause acts upon an
+    //                               Office of Supervisory Jurisdiction
+    //                               as a location/structure
+    // "branch_office"              → use when the clause acts upon a
+    //                               branch office as a location/
+    //                               structure
+    // "non_branch_location"        → use when the clause acts upon a
+    //                               location explicitly classified as
+    //                               non-branch
+    // "supervisory_personnel"      → use when the clause acts upon who
+    //                               is designated, qualified, or
+    //                               assigned as a supervisor
+    // "recommendation"              → use when the clause acts upon the
+    //                               act of recommending a security or
+    //                               strategy to a customer
+    // "communication"              → use when the clause acts upon a
+    //                               communication (its content,
+    //                               approval, filing, or review) sent
+    //                               to or received from any party
+    // "registered_person"          → use when the clause acts upon a
+    //                               registered person's conduct,
+    //                               registration, or status
+    // "associated_person"          → use when the clause acts upon an
+    //                               associated person's conduct or
+    //                               status, with no specific account
+    //                               or registration category implicated
+    // "customer"                   → use when the clause acts upon a
+    //                               customer directly (their interests,
+    //                               notifications to them, or
+    //                               protections owed to them) rather
+    //                               than their account or assets
+    //                               specifically
+    // "member_firm"                → use when the clause acts upon the
+    //                               member firm itself as an entity —
+    //                               its status, registration, or
+    //                               existence — distinct from its
+    //                               capital position or records
+    // "books_and_records"          → use when the clause acts upon
+    //                               records or documentation generally
+    //                               required to be kept, distinct from
+    //                               a specific document type already
+    //                               listed above (e.g. not specifically
+    //                               written_procedures or a BCP)
+    // "security_position"          → use when the clause acts upon a
+    //                               position in a security generally,
+    //                               with no more specific value
+    //                               applicable (not short, not swap)
+    // "transaction"                → use when the clause acts upon a
+    //                               transaction generally, with no more
+    //                               specific value applicable
+    // "other"                      → use when the clause clearly acts
+    //                               upon something, but that something
+    //                               does not match any value above
+    // "null"                       → use when the clause acts upon
+    //                               nothing identifiable — no party,
+    //                               object, document, or status is
+    //                               being established, restricted,
+    //                               reviewed, protected, or defined
     //
     // Use "associated_person_account" when the subject is an
     // account held by an associated person at another firm
@@ -675,13 +735,28 @@ SCHEMA TO POPULATE
     // subject is a payment, gift, or compensation arrangement
     // (rules 3220, 2040).
     //
-    // Always be as specific as possible. Use "other" only if
-    // the regulated subject is clearly not one of the listed
-    // entities or objects.
+    // Always be as specific as possible.
+    // Use "other" only if a regulated subject clearly exists but
+    // does not match any listed entity or object.
+    // Use "null" only if there is no entity or object being
+    // supervised, restricted, reviewed, protected, measured, or
+    // defined — regardless of whether the clause imposes an
+    // obligation.
 
     "activity_type": "",
     // The regulated activity this clause governs.
-    // THIS IS THE MOST IMPORTANT FIELD.
+    // THIS IS THE MOST IMPORTANT FIELD AND CANNOT BE SET NULL.
+    // HOW TO DECIDE: Ask — what is the member or person
+    // actually required to DO under the governing obligation
+    // this clause belongs to? Match that action to the closest
+    // value in the list above.
+    // IMPORTANT — If the clause is definitional, a sub-element,
+    // or a list item, do not attempt to derive an activity from
+    // verbs used in a descriptive or scoping context (e.g.
+    // "has control", "shall include", "is held by" are
+    // structural phrases, not regulated activities). Always
+    // match to the activity of the governing obligation, not
+    // to incidental verbs within the clause text.
     // Choose exactly ONE value from this list:
     //
     // 2000 series:
@@ -791,140 +866,174 @@ SCHEMA TO POPULATE
     // "BCDR_testing"                 → participating in FINRA's periodic
     //                                  business continuity and disaster
     //                                  recovery plan testing (rule 4380)
-    //
-    // HOW TO DECIDE: Ask — what is the member or person
-    // actually required to DO under the governing obligation
-    // this clause belongs to? Match that action to the closest
-    // value in the list above.
-    //
-    // IMPORTANT — If the clause is definitional, a sub-element,
-    // or a list item, do not attempt to derive an activity from
-    // verbs used in a descriptive or scoping context (e.g.
-    // "has control", "shall include", "is held by" are
-    // structural phrases, not regulated activities). Always
-    // match to the activity of the governing obligation, not
-    // to incidental verbs within the clause text.
 
     "applies_to_firm_type": [],
-    // List all firm types this clause applies to.
-    // Choose one or more values from this list:
+    // List ALL firm types this rule text applies to.
+    // A rule text may apply to more than one firm type — for example,
+    // a carrying agreement provision may apply to both "carrying_firm"
+    // AND "introducing_firm". Include every value that applies.
     //
-    // "broker_dealer"               → applies to all broker-dealers;
-    //                                 use as the default when no
-    //                                 specific firm type is named
-    // "carrying_firm"               → applies specifically to firms
-    //                                 that carry customer accounts
-    //                                 (rules 4311, 4314, 4220, 4230)
-    // "introducing_firm"            → applies specifically to firms
-    //                                 that introduce accounts to
-    //                                 carrying firms (rule 4311)
-    // "clearing_agency_participant" → applies to participants of a
-    //                                 registered clearing agency
-    //                                 (rule 4320)
-    // "section_15C_member"          → applies to government securities
-    //                                 dealers under Section 15C
-    // "restricted_firm"             → applies to firms subject to
-    //                                 Rule 4111 obligations
-    // "ATS_operator"                → applies to operators of
-    //                                 alternative trading systems
-    // "tape_recording_firm"         → applies to firms with a tape
-    //                                 recording history under 3170
-    // "financial_institution"       → applies to financial institutions
-    //                                 in networking arrangements
-    //                                 (rule 3160)
+    // HOW TO DECIDE: Ask — which firm type does this rule text
+    // concern? If the rule text imposes an obligation, identify
+    // which firm type bears that obligation. If the rule text is
+    // definitional or descriptive, identify which firm type the
+    // definition or description is scoping or qualifying. The
+    // firm type must be the one the rule text is fundamentally
+    // ABOUT — not merely one that appears in passing or as
+    // background context.
+    // If the rule text concerns a specific firm role, always
+    // prefer that specific value over "broker_dealer".
     //
-    // HOW TO DECIDE: Identify which firm type the governing
-    // obligation applies to. If the clause applies to members
-    // generally with no specific firm-type restriction, use
-    // ["broker_dealer"]. If uncertain, use ["broker_dealer"].
+    // Choose one or more values from this list, in order of
+    // specificity (most specific first):
+    //
+    // "carrying_firm"               → the rule text fundamentally
+    //                                 concerns a firm in its capacity
+    //                                 as the party that carries or
+    //                                 clears customer or broker-dealer
+    //                                 accounts — i.e., the firm that
+    //                                 holds the assets, computes margin,
+    //                                 or maintains net capital against
+    //                                 those accounts. Common in rules
+    //                                 4210, 4220, 4230, 4311, 4314.
+    //
+    // "introducing_firm"            → the rule text fundamentally
+    //                                 concerns a firm in its capacity
+    //                                 as the party that introduces
+    //                                 customer accounts to a carrying
+    //                                 firm, where the carrying firm
+    //                                 executes or settles transactions
+    //                                 on its behalf. Common in
+    //                                 rule 4311.
+    //
+    // "clearing_agency_participant" → the rule text fundamentally
+    //                                 concerns a firm in its capacity
+    //                                 as a participant of a registered
+    //                                 clearing agency, particularly
+    //                                 with respect to close-out or
+    //                                 delivery obligations arising
+    //                                 from that participation.
+    //                                 Common in rule 4320.
+    //
+    // "tape_recording_firm"         → the rule text fundamentally
+    //                                 concerns a firm in its capacity
+    //                                 as one that has been identified
+    //                                 by FINRA as subject to tape
+    //                                 recording requirements based
+    //                                 on its hiring history or prior
+    //                                 disciplinary record. Common in
+    //                                 rule 3170.
+    //
+    // "financial_institution"       → the rule text fundamentally
+    //                                 concerns a bank, thrift, or
+    //                                 credit union in its capacity
+    //                                 as the premises provider in a
+    //                                 networking arrangement with a
+    //                                 broker-dealer. Common in
+    //                                 rule 3160.
+    //
+    // "section_15C_member"          → the rule text fundamentally
+    //                                 concerns a firm in its capacity
+    //                                 as a registered government
+    //                                 securities dealer or broker
+    //                                 under Section 15C of the
+    //                                 Exchange Act.
+    //
+    // "restricted_firm"             → the rule text fundamentally
+    //                                 concerns a firm in its capacity
+    //                                 as one subject to heightened
+    //                                 obligations under Rule 4111
+    //                                 based on its concentration of
+    //                                 disciplinary history.
+    //
+    // "ATS_operator"                → the rule text fundamentally
+    //                                 concerns a firm in its capacity
+    //                                 as the operator of an alternative
+    //                                 trading system.
+    //
+    // "broker_dealer"               → the rule text concerns member
+    //                                 firms generally, with no specific
+    //                                 firm role as its focus. This is
+    //                                 the default and fallback value.
+    //                                 Always include "broker_dealer"
+    //                                 alongside any specific firm type
+    //                                 when the rule text operates within
+    //                                 the broader broker-dealer
+    //                                 regulatory framework (e.g. a
+    //                                 carrying firm provision under
+    //                                 rule 4210 still applies to a firm
+    //                                 that is also a broker-dealer, so
+    //                                 include both ["carrying_firm",
+    //                                 "broker_dealer"]). If uncertain,
+    //                                 use ["broker_dealer"].
 
     "involves_customer": false,
-    // Set to true if the clause directly concerns:
-    // - customer accounts or assets
-    // - interactions between firm employees and customers
-    // - protection of customer interests
-    // - any mention of "public customers", "retail customers",
-    //   "clients", or any direct reference to customers of
-    //   the member firm
-    // Otherwise set to false.
+    // DEFINITIONAL TEST: A clause involves_customer ONLY if the party
+    // being acted upon, protected, notified, or transacted with is a
+    // person or account that holds securities or funds with, or
+    // receives services from, the member firm in a non-employment,
+    // non-regulatory capacity. This includes any case where the
+    // clause's obligation exists specifically to protect, inform, or
+    // govern dealings with such a person, regardless of the specific
+    // word used to refer to them (customer, client, accountholder).
+    // It does NOT include a person or account that holds that
+    // relationship with an entity OTHER than the member firm itself
+    // (e.g. a customer of another broker-dealer), and it does NOT
+    // include the mere appearance of the word "customer" inside a
+    // definition that this specific clause does not itself rely on
+    // to impose its own obligation.
+    // Otherwise, set to false.
 
     "involves_third_party": false,
-    // Set to true if the clause involves an entity outside
-    // the member firm, such as:
-    // - another broker-dealer or financial institution
-    // - a bank, counterparty, or clearing agency
-    // - an outside employer or government entity
-    // - a registered national securities exchange
-    // - a self-regulatory organization
-    // - any external venue, platform, or institution not
-    //   itself part of the member firm
-    // SIMPLE CHECK: If the clause names or references ANY
-    // specific organization, institution, venue, or entity
-    // other than the member firm or its associated persons,
-    // set this to true. The presence of any named external
-    // entity in the clause is sufficient.
-    // Otherwise set to false.
+    // DEFINITIONAL TEST: A clause involves_third_party ONLY if the
+    // governing obligation requires, restricts, or describes
+    // an interaction with a party that is BOTH (a) legally and
+    // organizationally distinct from the member firm itself and from
+    // the member firm's own associated/registered persons, AND (b)
+    // not a customer of the member firm as defined for
+    // involves_customer above. This covers any such party regardless
+    // of its specific type — another firm, an institution, a
+    // regulator acting as a counterparty to an obligation (not merely
+    // as the rule's enforcing authority), an individual intermediary,
+    // an issuer, a guarantor, or any other organizationally separate
+    // party — as long as that party is the one the obligation is
+    // ABOUT or BETWEEN, not merely named in passing or in a
+    // definitional aside the clause does not rely on.
+    // Otherwise, set to false.
 
     "has_financial_threshold": false,
-    // Set to true if the clause's applicability or
-    // requirements depend on a financial metric such as:
-    // - capital ratios or net capital levels
-    // - gross revenue thresholds
-    // - margin percentages or account values
-    // - bond coverage minimums (e.g. $100,000, $250,000)
-    // - dollar contribution limits (e.g. $350 per election)
-    // Otherwise set to false.
+    // DEFINITIONAL TEST: A clause has_financial_threshold ONLY if whether
+    // or how the obligation applies is conditioned on a specific,
+    // quantifiable financial value — a dollar figure, a percentage,
+    // a ratio, or an explicit reference to such a value defined
+    // elsewhere that this clause's applicability depends on. The
+    // threshold must be a CONDITION on the obligation (a gate that
+    // determines applicability or a quantity the obligation must
+    // satisfy), not merely a topic the clause discusses. If this
+    // clause is a fragment, resolve the threshold from the nearest
+    // complete governing obligation it belongs to.
+    // A clause that discusses capital, margin, or value in purely
+    // qualitative terms — with no specific figure stated or
+    // referenced as a condition — is false. A clause whose
+    // applicability or required action changes at a specific
+    // quantified point is true.
+    // Otherwise, set to false.
 
     "documentation_required": false,
-    // Set to true if the clause explicitly requires:
-    // - a written record, report, plan, or filing
-    // - documentation to be retained or submitted
-    // - written authorization or written notice
-    // - written procedures to be established
-    // Look for phrases like "evidenced in writing",
-    // "written report", "kept on file", "must retain",
-    // "written authorization", "written notice",
-    // "written business continuity plan".
-    // Otherwise set to false.
+    // DEFINITIONAL TEST: A clause documentation_required ONLY if its own
+    // governing obligation imposes a duty to bring a written
+    // artifact into existence, retain it, submit it, or provide it to
+    // another party, as a condition of compliance. The artifact can
+    // be any form of record, notice, plan, authorization, agreement,
+    // or filing, regardless of the specific word used to describe it.
+    // It does NOT include a clause that merely defines the contents
+    // or required elements OF a document that some OTHER clause is
+    // the one imposing the duty to create — only the clause that
+    // itself imposes the creation/retention/submission duty is true.
+    // Otherwise, set to false.
 
     "frequency": null,
     // How often the obligation must be performed.
-    // Choose exactly ONE value or null:
-    //
-    // "ongoing"       → continuous obligation with no fixed cycle;
-    //                   look for phrases like "at all times",
-    //                   "continuously", "shall maintain", "must
-    //                   always ensure", or any obligation that
-    //                   implies a permanent, uninterrupted duty
-    //                   with no specific time interval stated
-    // "annual"        → once per calendar year
-    // "triennial"     → once every three years
-    // "quarterly"     → once per quarter
-    // "monthly"       → once per month
-    // "daily"         → every business day
-    // "semi_annual"   → twice per year
-    // "upon_trigger"  → only when a specific event occurs;
-    //                   look for conditional language such as
-    //                   "if", "when", "upon", "in the event that",
-    //                   "where a member determines", or any
-    //                   obligation that activates only after
-    //                   a specific condition is met
-    // "within_N_days" → within a specific number of days
-    // "one_time"      → a setup or establishment obligation
-    //                   required only once; look for phrases like
-    //                   "shall establish", "must adopt", "shall
-    //                   develop", or any obligation that is
-    //                   fulfilled permanently once completed
-    //                   and does not recur
-    // "other"         → a frequency is clearly stated in the
-    //                   clause but does not match any value above;
-    //                   use this sparingly and only when the
-    //                   clause explicitly states a time constraint
-    //                   that cannot be mapped to any other value
-    // null            → frequency is not stated in the clause and
-    //                   cannot be safely inferred; when in doubt,
-    //                   prefer null over an uncertain inference
-    //
     // HOW TO DECIDE:
     // 1. Look for an explicit time phrase that answers the
     //    question "how often must this obligation be performed?"
@@ -941,93 +1050,76 @@ SCHEMA TO POPULATE
     //    language as evidence of frequency. Always look for a
     //    separate, explicit signal that answers "how often?"
     //    before assigning any value.
-    // 4. If a frequency is clearly stated but does not match
-    //    any known value, use "other".
-    // 5. When in doubt, use null. null is the safe default.
+    // Choose exactly ONE value or null:
+    //
+    // "ongoing"       → the obligation exists as a permanent state
+    //                   that the actor must maintain without
+    //                   interruption. The compliance question is
+    //                   "are you in compliance right now?" — not
+    //                   "has the triggering event occurred?" A
+    //                   clause is ongoing even if it contains
+    //                   conditional language, as long as the
+    //                   underlying duty is continuous once the
+    //                   arrangement or relationship it governs
+    //                   is in place
+    // "annual"        → once per calendar year
+    // "triennial"     → once every three years
+    // "quarterly"     → once per quarter
+    // "monthly"       → once per month
+    // "daily"         → every business day
+    // "semi_annual"   → twice per year
+    // "upon_trigger"  → the obligation is dormant by default and
+    //                   activates only when a discrete, external
+    //                   event occurs that would not occur in the
+    //                   normal course of the arrangement. The
+    //                   compliance question is "has the event
+    //                   happened?" — not "are you maintaining
+    //                   the required state?" Once the triggering
+    //                   event resolves, the obligation returns
+    //                   to dormant
+    // "within_N_days" → within a specific number of days
+    // "one_time"      → a setup or establishment obligation
+    //                   required only once; look for phrases like
+    //                   "shall establish", "must adopt", "shall
+    //                   develop", or any obligation that is
+    //                   fulfilled permanently once completed
+    //                   and does not recur
+    // "other"         → a frequency is clearly stated in the
+    //                   clause but does not match any value above;
+    //                   use this sparingly and only when the
+    //                   clause explicitly states a time constraint
+    //                   that cannot be mapped to any other value
+    // null            → frequency is not stated in the clause and
+    //                   cannot be safely inferred; when in doubt,
+    //                   prefer null over an uncertain inference
+    //
+    // If a frequency is clearly stated but does not match
+    // any known value, use "other". 
+    // When in doubt, use null. null is the safe default.
 
     "reporting_recipient": null,
     // If the clause requires submitting a report or filing,
-    // identify who receives it. Choose ONE value or null:
+    // identify who receives it. 
+    // HOW TO DECIDE: Identify whether the governing obligation
+    // requires submitting a report or filing, and if so, who
+    // receives it.
+    // Choose ONE value or null:
     //
-    // null                            → no reporting required
     // "FINRA"                         → report goes to FINRA
     // "SEC"                           → report goes to the SEC
-    // "senior_management"             → report goes to firm leadership
-    // "customer"                      → notification goes to customer
     // "self_regulatory_organization"  → report goes to an SRO
     // "designated_examining_authority" → report or request goes to
     //                                   the member's DEA (rule 4230)
+    // "senior_management"             → report goes to firm leadership
+    // "customer"                      → notification goes to customer
     // "other"                         → report goes to a recipient
     //                                   not listed above
+    // null                            → no reporting required
     //
-    // HOW TO DECIDE: Identify whether the governing obligation
-    // requires submitting a report or filing, and if so, who
-    // receives it. If no reporting obligation is stated, use
-    // null. If a reporting obligation exists but no recipient
+    // If no reporting obligation is stated, use null. 
+    // If a reporting obligation exists but no recipient
     // is named, use "other".
 }}
-
-STEP-BY-STEP INSTRUCTIONS
-==========================
-Follow these steps in order before writing any output.
-
-STEP 1 — Read both the TARGET CLAUSE and the FULL RULE TEXT
-          together to fully understand the governing obligation,
-          its scope, and the role the target clause plays within
-          it. Keep this understanding in mind throughout every
-          subsequent step.
-
-STEP 2 — Identify the obligated_actor by finding the party who
-          is explicitly required to perform the governing
-          obligation. Be careful not to confuse a role or entity
-          mentioned in a descriptive or qualifying phrase with
-          the obligated actor — only the party explicitly
-          required to DO something qualifies. When the clause
-          text explicitly names "carrying firm" or "introducing
-          firm" as the obligated party, use those values rather
-          than the generic "member".
-
-STEP 3 — Identify the activity_type by asking: what is the actor
-          actually required to DO under the governing obligation?
-          If the target clause is definitional or a sub-element,
-          do not derive the activity from structural or
-          descriptive verbs within it — match to the activity of
-          the governing obligation instead.
-
-STEP 4 — Identify the regulated_subject by asking: what is being
-          acted upon, supervised, protected, restricted, or
-          measured by the governing obligation this clause
-          belongs to?
-
-STEP 5 — Select the category based on the rule ID and the
-          activity identified in STEP 3.
-
-STEP 6 — Set the boolean fields (involves_customer,
-          involves_third_party, has_financial_threshold,
-          documentation_required) by applying the criteria
-          described in each field's instructions.
-
-STEP 7 — Fill in frequency and reporting_recipient by looking
-          for explicit time phrases and reporting targets.
-          For frequency: the signal must explicitly answer "how
-          often must this obligation be performed?" — do not
-          treat definitional language or obligation language as
-          frequency signals. When in doubt, use null.
-          For reporting_recipient: identify whether the governing
-          obligation requires a report or filing and who receives
-          it. If none, use null.
-
-STEP 8 — Set applies_to_firm_type by identifying which firm type
-          the governing obligation targets. If the clause applies
-          to members generally, use ["broker_dealer"]. If the
-          clause explicitly names carrying firms or introducing
-          firms as the applicable party, use the specific value.
-
-STEP 9 — Review your output. Confirm every string value appears
-           in its allowed values list. Confirm no fields are
-           missing.
-
-STEP 10 — Output the final JSON object only. Nothing else.
 
 NOW PROCESS THE FOLLOWING INPUT
 ================================
