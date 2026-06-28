@@ -1175,7 +1175,7 @@ if __name__ == "__main__":
     with open(PARSED_CHECKPOINT) as f:
         all_rules = json.load(f)
 
-    all_rules = {k: v for k, v in all_rules.items() if k not in {"4210", "4220", "4230", "4240", "4311", "4314", "4320", "4330", "4340", "4360", "4370", "4380"}}
+    all_rules = {k: v for k, v in all_rules.items()}
     models     = [load_normalizer_model(model_name) for model_name in ["protected.o3", "protected.Claude Opus 4.7", "protected.gpt-5", "protected.gemini-2.5-pro"]]
     print(f"\n  ✓ Loaded {len(models)} normaliser models: {[m._model for m in models]}")
     print(f"  ✓ Running normalisation pipeline on {len(all_rules)} rules: {all_rules.keys()}")
