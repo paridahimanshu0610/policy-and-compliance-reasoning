@@ -76,6 +76,8 @@ def aggregate_json_objects(objects: list[dict]) -> dict:
     result = {}
     for field in scalar_fields:
         result[field] = majority_or_list([obj.get(field) for obj in objects])
+        if isinstance(result[field], list) and len(result[field]) == 1:
+            result[field] = result[field][0]
     for field in bool_fields:
         result[field] = majority_bool([obj.get(field) for obj in objects])
     for field in list_fields:
@@ -1012,6 +1014,42 @@ def run_scraping_pipeline() -> dict:
         print("\n  ✗ No rules were successfully scraped.")
 
     return all_rules
+
+def saving_aggregated_results(models: list[str]):
+    """
+    saving the aggregated results of all models into a single jsonl file for further processing.
+    Input: list of model names. E.g. ["protected.o3", "protected.Claude Opus 4.7", "protected.gpt-5", "protected.gemini-2.5-pro"]
+    Output: a single jsonl file containing the aggregated results of all models
+    """
+    
+    def checkpoint_for(model_name: str) -> Path:
+        safe_name = model_name.replace("protected.", "")
+        return DATA_DIR / f"normalized_{safe_name}.jsonl"
+
+    model_results = {}
+    for model_name in models:
+        path = checkpoint_for(model_name)
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                model_results[model_name] = [json.loads(line) for line in f]
+                model_results[model_name] = {temp["clause_ref"] : temp for temp in model_results[model_name]}
+
+    output_path = DATA_DIR + "normalized_aggregated_clause.jsonl"
+    other_agg_fields = ['id','document','clause_ref','parent_clause','clause_heading','merged_up_to','rule_id','rule_name','regulator']
+
+    all_clause_refs = model_results[models[0]].keys() 
+    with open(output_path, "w", encoding="utf-8") as fout:
+        for clause_ref in all_clause_refs:
+            other_field_vals = {field: model_results[models[0]][clause_ref].get(field) for field in other_agg_fields}
+            agg_clause = aggregate_json_objects([model_results[model_name][clause_ref] for model_name in models])
+
+            record = {
+                "clause_ref": clause_ref,
+                **other_field_vals,
+                **agg_clause
+            }
+
+            fout.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 # ── Step 3: Normalisation Pipeline ───────────────────────────────────────────
