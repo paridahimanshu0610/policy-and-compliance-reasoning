@@ -590,9 +590,8 @@ SCHEMA TO POPULATE
     //
     // Use "carrying_firm" or "introducing_firm" when the clause
     // explicitly names one of these roles as the party bearing
-    // the obligation (common in rules 4311, 4314). Use "member"
-    // when the obligation applies to member firms generally
-    // without distinguishing role.
+    // the obligation. Use "member" when the obligation applies
+    // to member firms generally without distinguishing role.
     //
     // Always be as specific as possible.
     // Use "other" only if an obligation clearly exists but the
@@ -616,7 +615,7 @@ SCHEMA TO POPULATE
     // "associated_person_account"  → use when the clause acts upon an
     //                               account held by an associated
     //                               person, particularly at a firm
-    //                               other than their employer (rule 3210)
+    //                               other than their employer
     // "customer_account"           → use when the clause acts upon a
     //                               customer's account as a structure
     //                               (opening, designation, discretionary
@@ -625,7 +624,7 @@ SCHEMA TO POPULATE
     //                               securities belonging to a customer
     //                               specifically (lending, holding,
     //                               protecting) rather than the account
-    //                               as a whole (rules 4330, 4340)
+    //                               as a whole
     // "margin_account"             → use when the clause acts upon a
     //                               margin account specifically,
     //                               distinct from a customer account
@@ -640,7 +639,7 @@ SCHEMA TO POPULATE
     //                               specifically
     // "carrying_agreement"         → use when the clause acts upon the
     //                               carrying agreement document or
-    //                               arrangement itself (rule 4311)
+    //                               arrangement itself
     // "business_continuity_plan"   → use when the clause acts upon the
     //                               BCP document itself — its creation,
     //                               content, or testing
@@ -650,11 +649,10 @@ SCHEMA TO POPULATE
     // "payment_or_gratuity"        → use when the clause acts upon a
     //                               payment, gift, or compensation
     //                               arrangement as the thing being
-    //                               restricted or permitted (rules
-    //                               3220, 2040)
+    //                               restricted or permitted
     // "CRD_record"                 → use when the clause acts upon
     //                               information recorded in the CRD
-    //                               system (rules 2080, 2081)
+    //                               system
     // "written_procedures"         → use when the clause acts upon the
     //                               procedures document itself (its
     //                               existence, content, or review)
@@ -725,16 +723,6 @@ SCHEMA TO POPULATE
     //                               being established, restricted,
     //                               reviewed, protected, or defined
     //
-    // Use "associated_person_account" when the subject is an
-    // account held by an associated person at another firm
-    // (rule 3210). Use "customer_securities" when the subject
-    // is securities belonging to customers that the member
-    // holds or lends (rules 4330, 4340). Use "CRD_record" when
-    // the subject is information recorded in the CRD system
-    // (rules 2080, 2081). Use "payment_or_gratuity" when the
-    // subject is a payment, gift, or compensation arrangement
-    // (rules 3220, 2040).
-    //
     // Always be as specific as possible.
     // Use "other" only if a regulated subject clearly exists but
     // does not match any listed entity or object.
@@ -749,7 +737,11 @@ SCHEMA TO POPULATE
     // HOW TO DECIDE: Ask — what is the member or person
     // actually required to DO under the governing obligation
     // this clause belongs to? Match that action to the closest
-    // value in the list above.
+    // value in the list above. For each value, the rule(s) it 
+    // generally applies to are shown in parentheses. However, if 
+    // the clause text clearly describes a different activity, choose 
+    // the activity that best matches the action being required, even 
+    // if it is not the usual activity for that rule. 
     // IMPORTANT — If the clause is definitional, a sub-element,
     // or a list item, do not attempt to derive an activity from
     // verbs used in a descriptive or scoping context (e.g.
@@ -762,110 +754,110 @@ SCHEMA TO POPULATE
     // 2000 series:
     // "conduct_standard"             → general standards of commercial
     //                                  honor or fraud prohibition
-    //                                  (rules 2010, 2020)
+    //                                  (generally for rules 2010, 2020)
     // "pay_to_play"                  → distribution/solicitation
     //                                  activities involving government
     //                                  entities; political contribution
-    //                                  restrictions (rule 2030)
+    //                                  restrictions (generally for rule 2030)
     // "payment_to_unregistered_person" → paying compensation to persons
     //                                  not registered as required;
-    //                                  finder arrangements (rule 2040)
+    //                                  finder arrangements (generally for rule 2040)
     // "fiduciary_information_use"    → use or misuse of ownership
     //                                  information obtained in a
-    //                                  fiduciary capacity (rule 2060)
+    //                                  fiduciary capacity (generally for rule 2060)
     // "FINRA_employee_transaction"   → handling accounts of FINRA
     //                                  employees; loans or gifts to
-    //                                  FINRA employees (rule 2070)
+    //                                  FINRA employees (generally for rule 2070)
     // "expungement"                  → seeking or conditioning
     //                                  expungement of CRD records
-    //                                  (rules 2080, 2081)
+    //                                  (generally for rules 2080, 2081)
     // "know_your_customer"           → knowing essential facts about
     //                                  customers and their accounts
-    //                                  (rule 2090)
+    //                                  (generally for rule 2090)
     //
     // 3000 series:
     // "supervision"                  → establishing and maintaining
     //                                  supervisory systems or controls
-    //                                  (rules 3110, 3120)
+    //                                  (generally for rules 3110, 3120)
     // "inspection"                   → conducting inspections of offices
-    //                                  or locations (rule 3110)
+    //                                  or locations (generally for rule 3110)
     // "review"                       → reviewing transactions,
     //                                  correspondence, or complaints
-    //                                  (rule 3110)
+    //                                  (generally for rule 3110)
     // "certification"                → annual CEO/CCO certification of
-    //                                  compliance processes (rule 3130)
+    //                                  compliance processes (generally for rule 3130)
     // "registration_verification"    → verifying registration status
-    //                                  of associated persons (rule 3110)
+    //                                  of associated persons (generally for rule 3110)
     // "mail_holding"                 → holding customer mail at the
-    //                                  member's office (rule 3150)
+    //                                  member's office (generally for rule 3150)
     // "networking_arrangement"       → broker-dealer services on
     //                                  financial institution premises
-    //                                  (rule 3160)
+    //                                  (generally for rule 3160)
     // "tape_recording"               → tape recording of registered
-    //                                  persons' conversations (rule 3170)
+    //                                  persons' conversations (generally for rule 3170)
     // "outside_account_disclosure"   → disclosure and monitoring of
     //                                  associated persons' accounts at
-    //                                  other broker-dealers (rule 3210)
+    //                                  other broker-dealers (generally for rule 3210)
     // "gifts_and_gratuities"         → giving or receiving payments,
     //                                  gifts, or gratuities involving
-    //                                  employees of other firms (rule 3220)
+    //                                  employees of other firms (generally for rule 3220)
     // "telemarketing"                → telephone solicitation rules and
-    //                                  do-not-call obligations (rule 3230)
+    //                                  do-not-call obligations (generally for rule 3230)
     // "borrowing_lending"            → borrowing from or lending to
-    //                                  customers (rule 3240)
+    //                                  customers (generally for rule 3240)
     // "beneficiary_designation"      → registered person named as
     //                                  beneficiary or trustee for a
-    //                                  customer (rule 3241)
+    //                                  customer (generally for rule 3241)
     // "designation"                  → designating accounts by number
     //                                  or symbol rather than customer
-    //                                  name (rule 3250)
+    //                                  name (generally for rule 3250)
     // "discretionary_trading"        → granting or exercising
     //                                  discretionary authority over
-    //                                  customer accounts (rule 3260)
+    //                                  customer accounts (generally for rule 3260)
     // "outside_business_activity"    → engaging in business activity
-    //                                  outside the member firm (rule 3270)
+    //                                  outside the member firm (generally for rule 3270)
     // "private_securities_transaction" → participating in securities
     //                                  transactions outside the member
-    //                                  firm (rule 3280)
+    //                                  firm (generally for  rule 3280)
     // "AML_monitoring"               → developing and implementing
     //                                  AML programs and controls
-    //                                  (rule 3310)
+    //                                  (generally for rule 3310)
     //
     // 4000 series:
     // "margin_calculation"           → calculating initial or
     //                                  maintenance margin requirements
-    //                                  (rules 4210, 4240)
+    //                                  (generally for rules 4210, 4240)
     // "margin_recordkeeping"         → maintaining daily margin records
-    //                                  for customer accounts (rule 4220)
+    //                                  for customer accounts (generally for rule 4220)
     // "margin_extension_request"     → submitting or reporting Reg T
-    //                                  extension requests (rule 4230)
+    //                                  extension requests (generally for rule 4230)
     // "swap_margin"                  → margin requirements for
-    //                                  security-based swaps (rule 4240)
+    //                                  security-based swaps (generally for rule 4240)
     // "carrying_agreement"           → entering into, approving, or
     //                                  administering carrying agreements
     //                                  between carrying and introducing
-    //                                  firms (rule 4311)
+    //                                  firms (generally for rule 4311)
     // "securities_lending"           → lending or borrowing securities;
     //                                  disclosing capacity in loan
-    //                                  transactions (rule 4314)
+    //                                  transactions (generally for rule 4314)
     // "short_sale_delivery"          → closing out fail-to-deliver
-    //                                  positions in short sales (rule 4320)
+    //                                  positions in short sales (generally for rule 4320)
     // "customer_asset_protection"    → obtaining authorization to lend
     //                                  customer securities; protecting
     //                                  fully paid or excess margin
-    //                                  securities (rule 4330)
+    //                                  securities (generally for rule 4330)
     // "callable_securities_allocation" → allocating called or redeemed
     //                                  securities among customers on a
-    //                                  fair and impartial basis (rule 4340)
+    //                                  fair and impartial basis (generally for rule 4340)
     // "fidelity_bond_maintenance"    → maintaining blanket fidelity bond
     //                                  coverage at required minimums
-    //                                  (rule 4360)
+    //                                  (generally for rule 4360)
     // "business_continuity_planning" → creating and maintaining a
     //                                  written business continuity plan
-    //                                  (rule 4370)
+    //                                  (generally for rule 4370)
     // "BCDR_testing"                 → participating in FINRA's periodic
     //                                  business continuity and disaster
-    //                                  recovery plan testing (rule 4380)
+    //                                  recovery plan testing (generally for rule 4380)
 
     "applies_to_firm_type": [],
     // List ALL firm types this rule text applies to.
@@ -880,7 +872,11 @@ SCHEMA TO POPULATE
     // definition or description is scoping or qualifying. The
     // firm type must be the one the rule text is fundamentally
     // ABOUT — not merely one that appears in passing or as
-    // background context.
+    // background context. For each firm type, the common rules it 
+    // generally applies to are shown in parentheses. However, if the 
+    // clause text clearly describes a different firm type, choose the 
+    // firm type that best matches the subject of the rule text, even 
+    // if it is not the usual firm type for that rule.
     // If the rule text concerns a specific firm role, always
     // prefer that specific value over "broker_dealer".
     //
@@ -1109,7 +1105,7 @@ SCHEMA TO POPULATE
     // "SEC"                           → report goes to the SEC
     // "self_regulatory_organization"  → report goes to an SRO
     // "designated_examining_authority" → report or request goes to
-    //                                   the member's DEA (rule 4230)
+    //                                   the member's DEA
     // "senior_management"             → report goes to firm leadership
     // "customer"                      → notification goes to customer
     // "other"                         → report goes to a recipient
