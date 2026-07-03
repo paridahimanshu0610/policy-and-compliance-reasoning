@@ -1,4 +1,5 @@
 import re as _re
+import os
 import time
 from openai import max_retries
 from collections import Counter
@@ -718,6 +719,8 @@ def aggregate_json_objects(objects: list[dict]) -> dict:
     result = {}
     for field in scalar_fields:
         result[field] = majority_or_list([obj.get(field) for obj in objects])
+        if isinstance(result[field], list) and len(result[field]) == 1:
+            result[field] = result[field][0]
     for field in bool_fields:
         result[field] = majority_bool([obj.get(field) for obj in objects])
     for field in list_fields:
@@ -898,7 +901,7 @@ class _TAMUBackend:
     def __init__(self, model_name):
         from openai import OpenAI
         self._client = OpenAI(
-            api_key  = "sk-8e7ccb67c4ab4d5eb69b5ed8e8d08814",
+            api_key  = os.getenv("TAMUS_AI_CHAT_API_KEY"),
             base_url = "https://chat-api.tamu.ai/api/v1",
         )
         self._model = model_name
