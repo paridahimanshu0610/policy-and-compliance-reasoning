@@ -8,4 +8,3 @@ logs
 *.pyc
 *.env
 qdrant_storage
-eval_results

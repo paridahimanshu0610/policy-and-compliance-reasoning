@@ -1,0 +1,34 @@
+[
+  {
+    "model":"Euler-Legal-Embedding-V1",
+    "mean_sim_lexSimilar_substDifferent (want LOW)":0.8119,
+    "mean_sim_lexDifferent_substSimilar (want HIGH)":0.6857,
+    "separation_margin (want HIGH)":-0.1262,
+    "num_missing_lexSimilar":0,
+    "num_missing_lexDifferent":0
+  },
+  {
+    "model":"Octen-Embedding-8B",
+    "mean_sim_lexSimilar_substDifferent (want LOW)":0.7844,
+    "mean_sim_lexDifferent_substSimilar (want HIGH)":0.6526,
+    "separation_margin (want HIGH)":-0.1318,
+    "num_missing_lexSimilar":0,
+    "num_missing_lexDifferent":0
+  },
+  {
+    "model":"voyage-law-2",
+    "mean_sim_lexSimilar_substDifferent (want LOW)":0.7988,
+    "mean_sim_lexDifferent_substSimilar (want HIGH)":0.6214,
+    "separation_margin (want HIGH)":-0.1774,
+    "num_missing_lexSimilar":0,
+    "num_missing_lexDifferent":0
+  },
+  {
+    "model":"text-embedding-3-small",
+    "mean_sim_lexSimilar_substDifferent (want LOW)":0.8352,
+    "mean_sim_lexDifferent_substSimilar (want HIGH)":0.6456,
+    "separation_margin (want HIGH)":-0.1896,
+    "num_missing_lexSimilar":0,
+    "num_missing_lexDifferent":0
+  }
+]

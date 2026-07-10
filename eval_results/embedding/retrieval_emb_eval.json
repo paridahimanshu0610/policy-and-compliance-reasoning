@@ -1,0 +1,160 @@
+{
+    "voyage-law-2": {
+        "situation1": {
+            "MAP": 0.7065476190476191,
+            "mean_R_precision": 0.5833333333333334,
+            "recall_at_k": {
+                "10": 0.9166666666666666,
+                "20": 0.9166666666666666
+            },
+            "MAP_by_clause_count": {
+                "1": {
+                    "MAP": 0.7065476190476191,
+                    "num_queries": 60
+                }
+            },
+            "num_queries_evaluated": 60
+        },
+        "situation2": {
+            "MAP": 0.6889050867800284,
+            "mean_R_precision": 0.6195899470899471,
+            "recall_at_k": {
+                "10": 0.9159259259259259,
+                "20": 0.9672222222222222
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.6416666666666666,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.6253086419753086,
+                    "num_queries": 9
+                },
+                "4": {
+                    "MAP": 0.7514880952380952,
+                    "num_queries": 6
+                },
+                "5": {
+                    "MAP": 0.6988120675620676,
+                    "num_queries": 6
+                },
+                "6": {
+                    "MAP": 0.6388655462184873,
+                    "num_queries": 3
+                },
+                "7": {
+                    "MAP": 0.8260204081632653,
+                    "num_queries": 1
+                },
+                "8": {
+                    "MAP": 0.9067956349206348,
+                    "num_queries": 1
+                },
+                "9": {
+                    "MAP": 0.7024139168747012,
+                    "num_queries": 2
+                }
+            },
+            "num_queries_evaluated": 30
+        },
+        "situation3": {
+            "MAP": 0.5654424497071556,
+            "mean_R_precision": 0.41666666666666663,
+            "recall_at_k": {
+                "10": 0.8333333333333334,
+                "20": 0.9333333333333333
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.875,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.4880530621339445,
+                    "num_queries": 8
+                }
+            },
+            "num_queries_evaluated": 10
+        }
+    },
+    "text-embedding-3-small": {
+        "situation1": {
+            "MAP": 0.5946560846560847,
+            "mean_R_precision": 0.4666666666666667,
+            "recall_at_k": {
+                "10": 0.85,
+                "20": 0.9166666666666666
+            },
+            "MAP_by_clause_count": {
+                "1": {
+                    "MAP": 0.5946560846560847,
+                    "num_queries": 60
+                }
+            },
+            "num_queries_evaluated": 60
+        },
+        "situation2": {
+            "MAP": 0.5496270624562525,
+            "mean_R_precision": 0.4925529100529101,
+            "recall_at_k": {
+                "10": 0.7833333333333333,
+                "20": 0.8861111111111111
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.28125,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.4601512684846018,
+                    "num_queries": 9
+                },
+                "4": {
+                    "MAP": 0.6372140522875817,
+                    "num_queries": 6
+                },
+                "5": {
+                    "MAP": 0.5480020905020905,
+                    "num_queries": 6
+                },
+                "6": {
+                    "MAP": 0.5156966490299824,
+                    "num_queries": 3
+                },
+                "7": {
+                    "MAP": 0.9093537414965985,
+                    "num_queries": 1
+                },
+                "8": {
+                    "MAP": 0.9526289682539681,
+                    "num_queries": 1
+                },
+                "9": {
+                    "MAP": 0.6322904718738052,
+                    "num_queries": 2
+                }
+            },
+            "num_queries_evaluated": 30
+        },
+        "situation3": {
+            "MAP": 0.43293956043956044,
+            "mean_R_precision": 0.35,
+            "recall_at_k": {
+                "10": 0.6666666666666666,
+                "20": 0.7666666666666666
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.85,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.32867445054945055,
+                    "num_queries": 8
+                }
+            },
+            "num_queries_evaluated": 10
+        }
+    }
+}
