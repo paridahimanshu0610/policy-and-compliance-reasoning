@@ -31,7 +31,7 @@ def aggregate_json_objects(objects: list[dict]) -> dict:
         return {}
 
     def normalize(value):
-        return None if value == "null" else value
+        return None if (value == "null" or value == '') else value
 
     def majority_or_list(values: list) -> Any:
         values = [normalize(v) for v in values]
@@ -58,7 +58,7 @@ def aggregate_json_objects(objects: list[dict]) -> dict:
         return True if true_count >= false_count else False
 
     def aggregate_list_field(list_of_lists: list[list]) -> Any:
-        flat = [normalize(item) for sublist in list_of_lists for item in (sublist or [])]
+        flat = [normalize(item) for sublist in list_of_lists for item in (sublist if isinstance(sublist, list) else [sublist])]
         if not flat:
             return []
         counter = Counter(flat)
@@ -76,8 +76,8 @@ def aggregate_json_objects(objects: list[dict]) -> dict:
     result = {}
     for field in scalar_fields:
         result[field] = majority_or_list([obj.get(field) for obj in objects])
-        if isinstance(result[field], list) and len(result[field]) == 1:
-            result[field] = result[field][0]
+        if isinstance(result[field], str):
+            result[field] = [result[field]]
     for field in bool_fields:
         result[field] = majority_bool([obj.get(field) for obj in objects])
     for field in list_fields:
