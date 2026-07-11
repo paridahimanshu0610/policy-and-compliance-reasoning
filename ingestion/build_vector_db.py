@@ -295,26 +295,56 @@ def search_clauses(
         {
             "clause_ref": r.payload["clause_ref"],
             "score": r.score,
-            # "rule_name": r.payload["rule_name"],
-            # "merged_clause": r.payload["merged_clause"],
-            # **r.payload,
+            "payload": r.payload,
         }
         for r in response.points
     ]
 
-"""
-query_embeddings.py
-
-Query-side embedding generation for Qdrant retrieval. Mirrors the ingestion
-pipeline in embed_clauses.py / embedders.py, but for the query side of search
-rather than the document side.
-
-Works with any of the 5 supported models:
-    Closed-source: "voyage-law-2", "text-embedding-3-small"
-    Open-source:   "Mira190/Euler-Legal-Embedding-V1",
-                    "Octen/Octen-Embedding-8B",
-                    "Qwen/Qwen3-Embedding-8B"
-"""
+def get_clause_by_ref(
+    clause_ref: str,
+    collection_name: str = COLLECTION_NAME,
+) -> dict | None:
+    """
+    Fetch one clause's full payload directly by its clause_ref -- no vector
+    search involved. Use this when you already know exactly which clause you
+    want, e.g. while walking up a parent chain, or fetching a clause that a
+    cross-reference lookup identified by name.
+ 
+    Returns None if no clause with that clause_ref exists in the collection.
+    """
+    point_id = clause_ref_to_uuid(clause_ref)
+    results = client.retrieve(
+        collection_name=collection_name,
+        ids=[point_id],
+        with_payload=True,
+    )
+    if not results:
+        return None
+    return results[0].payload
+ 
+ 
+def get_children(
+    parent_clause_ref: str,
+    collection_name: str = COLLECTION_NAME,
+    limit: int = 100,
+) -> list[dict]:
+    """
+    Find every clause whose `parent_clause` field points at parent_clause_ref.
+ 
+    Only the child -> parent link is stored on each clause (parent_clause),
+    there's no reverse "children" list stored anywhere. So walking DOWN the
+    hierarchy (parent -> children) means filtering: "give me every clause
+    whose parent_clause equals this ref". That's what this does.
+    """
+    results, _next_offset = client.scroll(
+        collection_name=collection_name,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="parent_clause", match=MatchValue(value=parent_clause_ref))]
+        ),
+        with_payload=True,
+        limit=limit,
+    )
+    return [r.payload for r in results]
 
 
 def generate_query_embeddings(
