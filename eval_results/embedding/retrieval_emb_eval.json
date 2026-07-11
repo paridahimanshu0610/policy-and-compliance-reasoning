@@ -156,5 +156,84 @@
             },
             "num_queries_evaluated": 10
         }
+    },
+    "Mira190/Euler-Legal-Embedding-V1": {
+        "situtation1": {
+            "MAP": 0.6314099326599327,
+            "mean_R_precision": 0.5166666666666667,
+            "recall_at_k": {
+                "10": 0.85,
+                "20": 0.8833333333333333
+            },
+            "MAP_by_clause_count": {
+                "1": {
+                    "MAP": 0.6314099326599327,
+                    "num_queries": 60
+                }
+            },
+            "num_queries_evaluated": 60
+        },
+        "situation2": {
+            "MAP": 0.6768085302361833,
+            "mean_R_precision": 0.5995899470899472,
+            "recall_at_k": {
+                "10": 0.8555555555555556,
+                "20": 0.913888888888889
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.8333333333333333,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.5613756613756613,
+                    "num_queries": 9
+                },
+                "4": {
+                    "MAP": 0.6659223817118554,
+                    "num_queries": 6
+                },
+                "5": {
+                    "MAP": 0.7752910052910053,
+                    "num_queries": 6
+                },
+                "6": {
+                    "MAP": 0.6137566137566138,
+                    "num_queries": 3
+                },
+                "7": {
+                    "MAP": 0.9821428571428571,
+                    "num_queries": 1
+                },
+                "8": {
+                    "MAP": 0.7713789682539682,
+                    "num_queries": 1
+                },
+                "9": {
+                    "MAP": 0.6715681496770248,
+                    "num_queries": 2
+                }
+            },
+            "num_queries_evaluated": 30
+        },
+        "situation3": {
+            "MAP": 0.4288359788359788,
+            "mean_R_precision": 0.41666666666666663,
+            "recall_at_k": {
+                "10": 0.65,
+                "20": 0.7666666666666666
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.7777777777777778,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.34160052910052907,
+                    "num_queries": 8
+                }
+            },
+            "num_queries_evaluated": 10
+        }
     }
 }
