@@ -66,6 +66,67 @@ TAMU_CONFIG = {
     "model":     "protected.gpt-5-nano",
 }
 
+LLM_MODELS = {
+    "o3":          {**TAMU_CONFIG, "model": "protected.o3"},
+    "claude_opus": {**TAMU_CONFIG, "model": "protected.Claude Opus 4.7"},
+    "gpt5":        {**TAMU_CONFIG, "model": "protected.gpt-5"},
+    "gemini":      {**TAMU_CONFIG, "model": "protected.gemini-2.5-pro"},
+}
+
+# Which model each agent "role" uses. The role names match the node/agent
+# that calls get_chat_model(role) in agent/llm.py. Change the value on the
+# right to swap models for that role without touching any node code.
+#
+#   intake    -- turns the user's plain-language message into normalized
+#                fields (does not need the strongest model; cheap + frequent)
+#   ambiguity -- decides if the query is genuinely ambiguous
+#   clarify   -- phrases the one clarifying question to ask
+#   reasoner  -- the deep agent: assigns clause roles, checks conflicts,
+#                decides scope, writes the final answer (wants the strongest
+#                reasoning model since mistakes here are the costly ones)
+ACTIVE_LLM = {
+    "intake":    "gpt5",
+    "ambiguity": "gpt5",
+    "clarify":   "gpt5",
+    "reasoner":  "claude_opus",
+}
+
+# ---------------------------------------------------------------------------
+# Embedding / vector DB configuration
+# ---------------------------------------------------------------------------
+ 
+# Maps each embedding model name to the Qdrant collection that was built
+# with it. Must match ingestion/build_vector_db.py's COLLECTION_NAME comment
+# block exactly.
+EMBEDDING_MODELS = {
+    "voyage-law-2":                     "voyage_embedded_clauses",
+    "Mira190/Euler-Legal-Embedding-V1":  "euler_embedded_clauses",
+    "text-embedding-3-small":           "text_embedded_clauses",
+    "Octen/Octen-Embedding-8B":         "octen_embedded_clauses",
+    "Qwen/Qwen3-Embedding-8B":          "qwen_embedded_clauses",
+}
+ 
+# The one embedding model / collection the agent actually queries against
+# right now. Change this single line to switch which vector database the
+# whole agent uses -- every retrieval call reads these two values from here.
+ACTIVE_EMBEDDING_MODEL = "voyage-law-2"
+ACTIVE_COLLECTION_NAME = EMBEDDING_MODELS[ACTIVE_EMBEDDING_MODEL]
+ 
+# How many candidate clauses to pull back per vector search call.
+RETRIEVAL_TOP_K = 20
+ 
+# Safety cap: max clarifying questions asked before the agent gives its best
+# answer anyway (with caveats), so a confused user never gets stuck in a loop.
+MAX_CLARIFICATION_TURNS = 3
+ 
+# Safety cap: max retrieve -> reason cycles within a single turn, in case the
+# reasoner keeps asking for "just one more search".
+MAX_REASONING_CYCLES = 3
+
+
+# ---------------------------------------------------------------------------
+# Previous version configurations
+# ---------------------------------------------------------------------------
 # ── Retrieval ─────────────────────────────────────────────────────────────────
 DEFAULT_TOP_K = 5
 
@@ -85,6 +146,8 @@ MAX_CLAUSE_CHARS = 1000
 # Truncate initial reasoning to prevent the context budget from being
 # dominated by the previous answer on long reasoning outputs.
 MAX_REASONING_CHARS = 5000
+# ---------------------------------------------------------------------------
+
 
 SERIES_MAP = {
     "2010": "2000", "2020": "2000", "2030": "2000", "2040": "2000",
