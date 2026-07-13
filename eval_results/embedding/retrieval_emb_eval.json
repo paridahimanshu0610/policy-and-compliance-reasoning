@@ -235,5 +235,69 @@
             },
             "num_queries_evaluated": 10
         }
+    },
+    "Octen/Octen-Embedding-8B": {
+        "situation2": {
+            "MAP": 0.7054523897252072,
+            "mean_R_precision": 0.6444047619047618,
+            "recall_at_k": {
+                "10": 0.8957407407407408,
+                "20": 0.9294444444444444
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.6666666666666666,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.5921516754850088,
+                    "num_queries": 9
+                },
+                "4": {
+                    "MAP": 0.7090277777777777,
+                    "num_queries": 6
+                },
+                "5": {
+                    "MAP": 0.8119523069523069,
+                    "num_queries": 6
+                },
+                "6": {
+                    "MAP": 0.6180555555555556,
+                    "num_queries": 3
+                },
+                "7": {
+                    "MAP": 0.961734693877551,
+                    "num_queries": 1
+                },
+                "8": {
+                    "MAP": 0.8338789682539682,
+                    "num_queries": 1
+                },
+                "9": {
+                    "MAP": 0.8626062209395543,
+                    "num_queries": 2
+                }
+            },
+            "num_queries_evaluated": 30
+        },
+        "situation3": {
+            "MAP": 0.5336674436674437,
+            "mean_R_precision": 0.41666666666666663,
+            "recall_at_k": {
+                "10": 0.8,
+                "20": 0.9
+            },
+            "MAP_by_clause_count": {
+                "2": {
+                    "MAP": 0.875,
+                    "num_queries": 2
+                },
+                "3": {
+                    "MAP": 0.44833430458430457,
+                    "num_queries": 8
+                }
+            },
+            "num_queries_evaluated": 10
+        }
     }
 }
