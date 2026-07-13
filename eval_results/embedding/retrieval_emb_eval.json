@@ -237,6 +237,21 @@
         }
     },
     "Octen/Octen-Embedding-8B": {
+        "situation1": {
+            "MAP": 0.6941666666666666,
+            "mean_R_precision": 0.5833333333333334,
+            "recall_at_k": {
+                "10": 0.9166666666666666,
+                "20": 0.9333333333333333
+            },
+            "MAP_by_clause_count": {
+                "1": {
+                    "MAP": 0.6941666666666666,
+                    "num_queries": 60
+                }
+            },
+            "num_queries_evaluated": 60
+        },
         "situation2": {
             "MAP": 0.7054523897252072,
             "mean_R_precision": 0.6444047619047618,
