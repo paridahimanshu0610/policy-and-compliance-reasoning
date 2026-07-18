@@ -14,7 +14,7 @@ reasoning is already done and it's a writing task, not an investigation.
 """
 
 import json
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -24,25 +24,25 @@ from deepagents import create_deep_agent
 from agent.state import AgentState
 from agent.llm import get_chat_model
 from agent.retrieval_tools import REASONER_TOOLS
-from config import prompts 
+from config import prompts
 from config.settings import MAX_REASONING_CYCLES
-
+from langchain.agents.middleware import AgentMiddleware
 
 # ---------------------------------------------------------------------------
 # Structured output the reasoner must produce
 # ---------------------------------------------------------------------------
 
-ALLOWED_ROLES = {
+RelevanceRole = Literal[
     "rule", "definition", "exception", "condition", "safe_harbor", "override",
     "procedural", "calculation", "record_keeping", "disclosure",
     "cross_reference", "table_row",
-}
+]
 
 
 class ReasonedClause(BaseModel):
     clause_ref: str
-    relevance_role: str = Field(description=f"One of: {', '.join(sorted(ALLOWED_ROLES))}")
-    reasoning: str = Field(description="2-4 sentences: which fact triggered this, what it contributes.")
+    relevance_role: RelevanceRole
+    reasoning: str
 
 
 class ReasonedConflict(BaseModel):
@@ -52,8 +52,8 @@ class ReasonedConflict(BaseModel):
 
 
 class ReasonerOutput(BaseModel):
-    sufficient: bool = Field(description="True if this clause set fully answers the situation.")
-    needs: Optional[str] = Field(default=None, description="If not sufficient, what to search for next.")
+    sufficient: bool
+    needs: Optional[str] = None
     out_of_scope: bool = False
     scope_note: Optional[str] = None
     clauses: list[ReasonedClause] = []
@@ -64,15 +64,22 @@ class ReasonerOutput(BaseModel):
 # per-invocation (conversation state is whatever we pass into .invoke()).
 _reasoner_agent = None
 
+class SanitizeNoneContentMiddleware(AgentMiddleware):
+    def wrap_model_call(self, request, handler):
+        for msg in request.messages:
+            if getattr(msg, "content", None) is None:
+                msg.content = ""
+        return handler(request)
 
 def _get_reasoner_agent():
     global _reasoner_agent
     if _reasoner_agent is None:
         _reasoner_agent = create_deep_agent(
             model=get_chat_model("reasoner"),
-            tools=REASONER_TOOLS,
-            system_prompt=prompts.REASONER_SYSTEM_PROMPT,
+            # tools=REASONER_TOOLS,
+            system_prompt= prompts.REASONER_SYSTEM_PROMPT,
             response_format=ReasonerOutput,
+            middleware=[SanitizeNoneContentMiddleware()],
         )
     return _reasoner_agent
 
@@ -89,13 +96,16 @@ def reason_node(state: AgentState) -> dict:
         for c in state.get("clause_graph", [])
     ]
     task = (
-        f"Known facts about the situation: {state.get('known_fields', {})}\n\n"
-        f"User's question: {state['raw_query']}\n\n"
+        f"Full situation: {state.get('situation_summary') or state['raw_query']}\n\n"
+        f"Known structured facts: {state.get('known_fields', {})}\n\n"
         f"Candidate clauses gathered so far:\n{json.dumps(clause_summaries, indent=2)}"
     )
+    
+    with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/artifacts/test1.txt", "w", encoding="utf-8",) as f:
+        f.write(task)
 
     result = agent.invoke({"messages": [{"role": "user", "content": task}]})
-    output: ReasonerOutput = result["structured_response"]
+    output: ReasonerOutput = result["structured_response"] # result["messages"][-1] 
 
     graph = {c["clause_ref"]: c for c in state.get("clause_graph", [])}
     for reasoned in output.clauses:
@@ -151,8 +161,8 @@ def synthesize_node(state: AgentState) -> dict:
 
     llm = get_chat_model("reasoner")
     context = {
+        "situation": state.get("situation_summary") or state["raw_query"],
         "known_facts": state.get("known_fields", {}),
-        "question": state["raw_query"],
         "reasoned_clauses": [
             {"clause_ref": c["clause_ref"], "role": c["relevance_role"], "reasoning": c["reasoning"]}
             for c in relevant

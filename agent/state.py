@@ -22,7 +22,17 @@ class AgentState(TypedDict, total=False):
     # so LangGraph appends new messages instead of overwriting the list.
 
     raw_query: str
-    # The exact text the user just typed this turn (not normalized).
+    # The exact text the user just typed THIS TURN ONLY. After a clarifying
+    # question, this might just be "yes" or "$500" -- it is NOT a restatement
+    # of the whole situation, so don't use it alone for retrieval.
+
+    situation_summary: str
+    # A running plain-language description of the FULL situation as
+    # understood so far, rewritten (not just appended to) every turn by
+    # intake_node. This is what retrieval should search on -- it stays
+    # coherent even when the latest message is a one-word answer to a
+    # clarifying question, because it already has the earlier context baked
+    # in.
 
     # --- accumulated understanding of the situation ---
     known_fields: dict[str, Any]
@@ -33,6 +43,8 @@ class AgentState(TypedDict, total=False):
     # filter_conditions. Keeping it in this shape (instead of free-text
     # notes) is what lets "understand the user" and "filter the database"
     # stay in sync automatically.
+
+    uncertain_fields: list[str]
 
     # --- ambiguity handling ---
     is_ambiguous: bool

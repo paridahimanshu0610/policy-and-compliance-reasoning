@@ -21,8 +21,7 @@ import re
 from langchain_core.tools import tool
 
 from config.settings import ACTIVE_COLLECTION_NAME, ACTIVE_EMBEDDING_MODEL, RETRIEVAL_TOP_K
-from ingestion.build_vector_db import search_clauses, get_clause_by_ref, get_children as _get_children
-from ingestion.build_vector_db import generate_query_embeddings
+from ingestion.build_vector_db import search_clauses, get_clause_by_ref, get_children as _get_children, generate_query_embeddings
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +35,7 @@ def vector_search(query_text: str, filter_conditions: dict | None = None, top_k:
     ingestion.build_vector_db.search_clauses expects).
     """
     embedding = generate_query_embeddings(query_text, ACTIVE_EMBEDDING_MODEL)
+    print("Generated embedding for the query text, now searching the vector database...")
     return search_clauses(
         query_embedding=embedding,
         top_k=top_k or RETRIEVAL_TOP_K,

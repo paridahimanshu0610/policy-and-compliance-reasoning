@@ -67,10 +67,10 @@ TAMU_CONFIG = {
 }
 
 LLM_MODELS = {
-    "o3":          {**TAMU_CONFIG, "model": "protected.o3"},
-    "claude_opus": {**TAMU_CONFIG, "model": "protected.Claude Opus 4.7"},
-    "gpt5":        {**TAMU_CONFIG, "model": "protected.gpt-5"},
-    "gemini":      {**TAMU_CONFIG, "model": "protected.gemini-2.5-pro"},
+    "o3":          {**TAMU_CONFIG, "model": "protected.o3", "supports_temperature": False},
+    "claude_opus": {**TAMU_CONFIG, "model": "protected.Claude Opus 4.7", "supports_temperature": True},
+    "gpt5":        {**TAMU_CONFIG, "model": "protected.gpt-5", "supports_temperature": True},
+    "gemini":      {**TAMU_CONFIG, "model": "protected.gemini-2.5-pro", "supports_temperature": True},
 }
 
 # Which model each agent "role" uses. The role names match the node/agent
@@ -85,10 +85,10 @@ LLM_MODELS = {
 #                decides scope, writes the final answer (wants the strongest
 #                reasoning model since mistakes here are the costly ones)
 ACTIVE_LLM = {
-    "intake":    "gpt5",
-    "ambiguity": "gpt5",
-    "clarify":   "gpt5",
-    "reasoner":  "claude_opus",
+    "intake":    "o3",
+    "ambiguity": "o3",
+    "clarify":   "o3",
+    "reasoner":  "o3",
 }
 
 # ---------------------------------------------------------------------------

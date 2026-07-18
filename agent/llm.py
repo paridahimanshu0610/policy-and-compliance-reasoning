@@ -39,10 +39,16 @@ def get_chat_model(role: str, temperature: float = 0.0) -> ChatOpenAI:
             "TAMUS_AI_CHAT_API_KEY / TAMUS_AI_CHAT_API_ENDPOINT are not set. "
             "Check your .env file."
         )
-
-    return ChatOpenAI(
-        model=cfg["model"],
-        base_url=cfg["base_url"],
-        api_key=cfg["api_key"],
-        temperature=temperature,
-    )
+ 
+    kwargs = {
+        "model": cfg["model"],
+        "base_url": cfg["base_url"],
+        "api_key": cfg["api_key"],
+    }
+    # Some models behind the gateway (reasoning-style ones especially) throw
+    # a 400 if you send temperature at all -- only include it for models
+    # config.settings marks as supporting it. See the comment on LLM_MODELS.
+    if cfg.get("supports_temperature", True):
+        kwargs["temperature"] = temperature
+ 
+    return ChatOpenAI(**kwargs)

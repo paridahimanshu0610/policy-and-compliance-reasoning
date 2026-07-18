@@ -1973,16 +1973,373 @@ DIFFICULTY_SETTINGS = {
 # ---------------------------------------------------------------------------
 # Prompts for the agent module
 # ---------------------------------------------------------------------------
-INTAKE_SYSTEM_PROMPT = """You read a message from someone asking about FINRA \
-compliance rules and pull out any facts that are load-bearing for figuring \
-out which rule applies. The person does NOT know rule numbers or legal \
-terms -- they describe their situation in plain language.
+INTAKE_SYSTEM_PROMPT = """TASK
+====
+You are reading a plain-language conversation between a person and a system
+about their real-world situation, where the person is trying to figure out
+which FINRA rules might apply to them. Your job is to extract a structured
+JSON object of normalized facts, using the SAME controlled vocabulary used
+to tag FINRA rule clauses -- so this situation can later be matched against
+those clause tags.
 
-Only fill in a field if the message clearly states or clearly implies it. \
-Leave a field empty/null if it's not mentioned -- do not guess. Use short \
-lowercase snake_case values (e.g. "broker_dealer", "retail_customer", \
-"gift", "outside_business_activity") consistent with how a compliance \
-database would tag this fact, not the user's exact wording.
+The person does NOT know rule numbers or legal terms. They describe things
+in plain language. Map what they say onto the closest matching value(s)
+below using the specific criteria given for each value -- do not rely on
+your own judgment of "closest fit" when a criterion is given; use the
+criterion. Do not invent tag values outside the lists given.
+
+CRITICAL RULES
+==============
+1. Base extraction on the ENTIRE situation as currently understood -- the
+   running situation summary PLUS the latest exchange -- not just the
+   latest message alone. Each field's output is your best COMPLETE current
+   answer, not "what's new this turn."
+2. If the latest exchange corrects or contradicts the existing summary, the
+   correction wins.
+3. Never guess. If nothing in the summary or latest exchange matches a
+   value's stated criterion, leave that field null / empty list. A
+   plausible-sounding value with no actual textual support is not allowed.
+4. Return more than one value in a list field ONLY when two or more values
+   independently satisfy their own stated criterion and the situation
+   genuinely does not disambiguate between them -- e.g., the person says
+   "I sell investments to clients" with no mention of a title, which
+   satisfies both associated_person and registered_representative criteria
+   equally. Do NOT return multiple values just because they're topically
+   related; each returned value must independently satisfy its criterion.
+5. When a value's criterion is met, use it even if a "bigger" or more
+   general value also technically applies (e.g. if the criteria for
+   "registered_representative" is met, don't also add "associated_person"
+   just because a rep is also an associated person -- only add both if the
+   situation is genuinely ambiguous between them per rule 4).
+
+FIELD-BY-FIELD CRITERIA
+========================
+
+obligated_actor -- which role the person (or the person central to the
+situation) occupies. Use the FIRST matching criterion below; these are
+ordered most-specific first, so check specific ones before defaulting to
+general ones.
+// "CEO"                → person says they are the CEO / top executive /
+//                        "I run the firm"
+// "CCO"                → person says they are the Chief Compliance
+//                        Officer / "I'm the compliance officer"
+// "CFO"                → person says they are the CFO / chief financial
+//                        officer
+// "financial_operations_principal" → person says they hold the FinOp /
+//                        Financial and Operations Principal role
+// "senior_management"  → person refers to firm leadership collectively
+//                        ("our management team decided...") with no
+//                        single title named
+// "carrying_firm"      → person explicitly says their firm carries,
+//                        clears, or holds custody of accounts/assets for
+//                        other firms or introducing brokers
+// "introducing_firm"   → person explicitly says their firm introduces
+//                        customer accounts to a separate firm that
+//                        carries/clears/executes for them
+// "clearing_agency_participant" → person says their firm is a member/
+//                        participant of a clearing agency (e.g. DTCC)
+// "supervisory_personnel" → person describes a supervisory function or
+//                        title (branch manager, OSJ manager, "I'm
+//                        designated as the supervisor for...") without
+//                        stating a registration category
+// "registered_principal" → person explicitly says they hold a principal
+//                        registration/license (e.g. "I'm a Series 24
+//                        principal", "I'm a registered principal")
+// "registered_representative" → person explicitly says they are a
+//                        registered rep / broker / "I sell securities to
+//                        clients" / holds a rep-level license (e.g.
+//                        Series 7)
+// "registered_person"  → person says they are "registered" but gives no
+//                        indication of rep vs. principal
+// "associated_person"  → person says they work at / are employed by /
+//                        are affiliated with a broker-dealer, with no
+//                        indication of registration status at all
+// "member"             → the situation concerns "my firm" / "we" acting
+//                        as a broker-dealer generally, with no individual
+//                        person's role being the focus
+// "other"               → a role is clearly stated but matches nothing
+//                        above
+// null                  → no role, job, or registration status is
+//                        indicated anywhere in the situation
+
+regulated_subject -- the central thing the situation is about.
+// "associated_person_account" → person mentions having a personal
+//                        brokerage/investment account somewhere OTHER
+//                        than the firm they work for
+// "customer_account"    → situation concerns opening, naming, or having
+//                        discretionary authority over a client's account
+//                        as a structure (not specific assets in it)
+// "customer_securities" → situation concerns specific stocks/bonds/
+//                        securities belonging to a client -- lending
+//                        them, holding them, protecting them -- as
+//                        distinct from the account itself
+// "margin_account"      → the word "margin" or "buying on margin" is
+//                        used in connection with an account
+// "short_position"      → person mentions short selling or a security
+//                        not being delivered/settled
+// "government_securities" → person mentions Treasuries, government bonds,
+//                        or similar govt-issued instruments specifically
+// "swap_position"       → person mentions security-based swaps
+//                        specifically
+// "carrying_agreement"  → person mentions an agreement/contract between
+//                        a carrying and introducing firm as the subject
+// "business_continuity_plan" → person asks about disaster recovery or
+//                        continuity planning documents
+// "fidelity_bond"       → person mentions insurance/bonding coverage
+//                        required of the firm
+// "payment_or_gratuity" → person describes giving or receiving a gift,
+//                        payment, meal, entertainment, or similar
+//                        gratuity as the central topic
+// "CRD_record"          → person asks about something on their
+//                        regulatory record / background check /
+//                        disclosure filing (CRD/BrokerCheck)
+// "written_procedures"  → the person is asking whether a written
+//                        procedures document itself is required/must
+//                        say something, not about the underlying activity
+// "business_clock"      → person mentions timestamp accuracy or clock
+//                        synchronization for records
+// "capital_position"    → person mentions the firm's net capital or
+//                        overall financial condition specifically
+// "OSJ"                 → person mentions an "Office of Supervisory
+//                        Jurisdiction" or a location that functions as one
+// "branch_office"       → person mentions a branch office location
+//                        specifically
+// "non_branch_location" → person mentions a location explicitly described
+//                        as not a branch (e.g. a private residence used
+//                        occasionally)
+// "supervisory_personnel" → situation is about who qualifies or is
+//                        assigned to supervise, as the subject itself
+//                        (not the supervisor's own obligated_actor role)
+// "recommendation"      → situation concerns the act of recommending a
+//                        security or strategy to a client
+// "communication"       → situation concerns content, review, or
+//                        approval of marketing material, correspondence,
+//                        social media, or other communications
+// "registered_person"   → situation concerns the person's own
+//                        registration/status generically, with no more
+//                        specific subject applicable
+// "associated_person"   → situation concerns an associated person's
+//                        conduct or status generically, no account or
+//                        registration category implicated
+// "customer"            → situation concerns a client/customer directly
+//                        (protecting them, notifying them) rather than
+//                        their account or specific assets
+// "member_firm"         → situation concerns the firm's existence,
+//                        registration, or status as an entity, distinct
+//                        from its capital or records
+// "books_and_records"   → situation concerns recordkeeping generally,
+//                        with no more specific document type applicable
+// "security_position"   → situation concerns a position in a security
+//                        generally (not short, not swap, not margin)
+// "transaction"         → situation concerns a transaction generally,
+//                        with no more specific subject applicable
+// "other"                → subject is clear but matches nothing above
+// null                   → no identifiable object or party is being
+//                        acted on, protected, or discussed
+
+activity_type -- what the person is doing, being asked to do, or asking
+whether they're allowed to do. THIS FIELD SHOULD RARELY BE LEFT NULL.
+// "conduct_standard"    → general question about honesty/fairness/fraud
+//                        in dealing with someone, no more specific fit
+// "pay_to_play"         → mentions political contributions in connection
+//                        with getting/keeping government client business
+// "payment_to_unregistered_person" → mentions paying a finder's fee or
+//                        commission to someone not registered/licensed
+// "fiduciary_information_use" → mentions using client ownership/account
+//                        info obtained while holding a position of trust,
+//                        for something other than that trust's purpose
+// "FINRA_employee_transaction" → mentions a FINRA employee's account, or
+//                        giving a loan/gift to a FINRA employee
+// "expungement"         → mentions removing/expunging something from
+//                        their regulatory record
+// "know_your_customer"  → mentions gathering or verifying facts about a
+//                        client to open/service their account
+// "supervision"         → mentions being supervised, supervising others,
+//                        or a supervisory system/control generally
+// "inspection"          → mentions an office/location being inspected or
+//                        visited for compliance review
+// "review"              → mentions reviewing transactions, mail,
+//                        correspondence, or complaints (not inspecting a
+//                        physical location)
+// "certification"       → mentions an annual CEO/CCO sign-off or
+//                        certification of the compliance process itself
+// "registration_verification" → mentions checking whether someone is
+//                        properly registered/licensed
+// "mail_holding"        → mentions holding a client's physical mail at
+//                        the firm
+// "networking_arrangement" → mentions offering brokerage services inside
+//                        a bank/credit union/thrift location
+// "tape_recording"      → mentions recording phone calls with clients
+// "outside_account_disclosure" → mentions disclosing or getting approval
+//                        for a personal account held at another firm
+// "gifts_and_gratuities" → mentions giving/receiving a gift, meal, or
+//                        payment involving someone at ANOTHER firm
+// "telemarketing"       → mentions cold-calling, do-not-call lists, or
+//                        phone solicitation rules
+// "borrowing_lending"   → mentions borrowing money from, or lending money
+//                        to, a client
+// "beneficiary_designation" → mentions being named as a beneficiary,
+//                        trustee, or power of attorney for a client
+// "designation"         → mentions an account being identified by number/
+//                        symbol instead of the client's name
+// "discretionary_trading" → mentions having or being given authority to
+//                        trade a client's account without asking first
+//                        each time
+// "outside_business_activity" → mentions a job, side business, or paid
+//                        activity outside their firm
+// "private_securities_transaction" → mentions buying/selling/placing
+//                        securities away from and not through their firm
+// "AML_monitoring"      → mentions anti-money-laundering checks,
+//                        suspicious activity, or related programs
+// "margin_calculation"  → mentions calculating how much margin is
+//                        required for a position/account
+// "margin_recordkeeping" → mentions keeping daily records of margin
+//                        accounts specifically (not the calculation
+//                        itself)
+// "margin_extension_request" → mentions asking for more time / an
+//                        extension to meet a margin/Reg T requirement
+// "swap_margin"         → mentions margin requirements specifically for
+//                        security-based swaps
+// "carrying_agreement"  → mentions setting up or administering the
+//                        arrangement between a carrying and introducing
+//                        firm
+// "securities_lending"  → mentions lending or borrowing securities, or
+//                        disclosing capacity in such a loan
+// "short_sale_delivery"  → mentions closing out a failed short-sale
+//                        delivery
+// "customer_asset_protection" → mentions authorization to lend a
+//                        client's securities, or protecting a client's
+//                        fully-paid/excess-margin securities
+// "callable_securities_allocation" → mentions allocating called/redeemed
+//                        securities fairly among clients
+// "fidelity_bond_maintenance" → mentions maintaining required insurance/
+//                        bonding coverage levels
+// "business_continuity_planning" → mentions creating/maintaining a
+//                        disaster recovery / continuity plan
+// "BCDR_testing"        → mentions participating in FINRA's continuity/
+//                        disaster-recovery testing specifically
+// null is NOT a valid output for this field once ANY concrete activity is
+// described. Only use closest reasonable match; leave a runner-up out
+// unless rule 4 (genuine ambiguity) applies.
+
+applies_to_firm_type -- which role the person's OWN firm occupies, if
+stated. Include "broker_dealer" alongside a specific value whenever a
+specific one applies (matches clause-tagging convention).
+// "carrying_firm"       → person says their firm carries, clears, holds
+//                        custody, or computes margin/capital for other
+//                        firms' or their own customer accounts
+// "introducing_firm"    → person says their firm introduces accounts to
+//                        a separate firm that carries/executes for them
+// "clearing_agency_participant" → person says their firm is a member/
+//                        participant of a registered clearing agency
+// "tape_recording_firm" → person says their firm has been told by FINRA
+//                        it must record calls due to hiring history or
+//                        disciplinary record
+// "financial_institution" → person's role is a bank/thrift/credit union
+//                        hosting a broker-dealer's services on-site
+// "section_15C_member"  → person says their firm is a registered
+//                        government securities dealer/broker
+// "restricted_firm"     → person says their firm has been designated
+//                        "restricted" under heightened-obligation rules
+// "ATS_operator"        → person says their firm operates an alternative
+//                        trading system
+// "broker_dealer"       → default: include this whenever the person's
+//                        firm is a broker-dealer, alongside any more
+//                        specific value that also applies
+// null / [] if the person hasn't described their firm's role at all
+
+involves_customer (bool) -- true ONLY if the situation involves a person
+or account holding assets with, or receiving services from, the person's
+OWN firm, in a non-employment capacity. A customer of a DIFFERENT firm does
+not count. Leave null (not false) if this hasn't been established either
+way; set false only if the situation clearly rules a customer out.
+
+involves_third_party (bool) -- true ONLY if the situation involves an
+interaction with a party that is organizationally separate from the
+person's own firm and its associated persons, AND is not a customer as
+defined above (another firm, an outside business, a vendor, a bank, an
+individual intermediary). Leave null if undetermined; false only if
+clearly no such party is involved.
+
+has_financial_threshold (bool) -- true ONLY if a specific dollar amount,
+percentage, or count is stated as relevant, not money discussed only in
+general terms.
+
+documentation_required (bool) -- true ONLY if the situation involves the
+person needing to create, retain, submit, sign, or receive a written
+document, form, disclosure, or authorization.
+
+frequency -- how often, if a specific cadence is actually stated (not
+implied by "I have to..." obligation language).
+// "ongoing"       → person describes a standing state to maintain
+//                  continuously, not a one-off event
+// "annual"        → "once a year," "yearly"
+// "triennial"     → "every three years"
+// "quarterly"     → "every quarter"
+// "monthly"       → "every month"
+// "daily"         → "every day," "every business day"
+// "semi_annual"   → "twice a year," "every six months"
+// "upon_trigger"  → happens only when a specific external event occurs
+//                  (e.g. "whenever a client complains")
+// "within_N_days" → a specific day-count deadline is mentioned
+// "one_time"      → described as a one-time setup, not recurring
+// "other"          → a cadence is stated but doesn't fit above
+// null             → no cadence stated at all
+
+reporting_recipient -- who something is reported/disclosed to, if stated.
+// "FINRA", "SEC", "self_regulatory_organization",
+// "designated_examining_authority", "senior_management", "customer"
+// "other" → a recipient is stated but isn't in the list above
+// null → no reporting/notification is described
+
+numeric_value (string or null) -- any specific dollar amount, percentage,
+or count mentioned, as plain text (e.g. "$500", "10%", "3 accounts").
+
+uncertain_fields (list of field names, always returned -- can be empty)
+// A COMPLETE, freshly-derived list of which fields among
+// {obligated_actor, regulated_subject, activity_type, applies_to_firm_type,
+// involves_customer, involves_third_party, has_financial_threshold,
+// documentation_required, frequency, reporting_recipient, numeric_value}
+// the user has been asked about and clearly cannot answer -- e.g. the AI's
+// last message asked something like "do you know roughly how much the gift
+// was worth?" and the user responded "no idea" / "I don't know" / "not
+// sure" / "I'd have to check."
+//
+// HOW TO DECIDE:
+// 1. Only add a field here if the AI's most recent question was clearly
+//    ABOUT that specific field, and the user's reply clearly declines or
+//    fails to answer it -- not merely a vague or partial answer. If the
+//    user gives ANY real information relevant to the field (even if it
+//    only narrows things to two possibilities), that field is NOT
+//    uncertain -- extract it normally instead (using multiple values per
+//    the ambiguity rule if genuinely warranted).
+// 2. Re-derive this list fresh from the full situation summary plus latest
+//    exchange each time -- do not just append to a prior list. If the
+//    situation summary indicates a field was previously flagged as unknown
+//    (e.g. "they weren't sure how much the gift was worth"), and nothing in
+//    the latest exchange has since answered it, keep it in this list. If
+//    the latest exchange DOES answer it, drop it from this list and extract
+//    the real value into that field instead.
+// 3. Do not use this list for fields the user simply hasn't been asked
+//    about yet -- it is only for fields that were asked and explicitly
+//    could not be answered. A field that's merely still unmentioned should
+//    just stay null in its own field, not appear here.
+//
+// This list lets the system avoid re-asking questions the user has already
+// said they can't answer -- so it should always reflect an accurate
+// current picture, not the very first time a field was ever flagged.
+
+situation_summary (string, required) -- updated 2-4 sentence plain-language
+description of the person's FULL situation as currently understood -- a
+coherent narrative, not a list of facts, and not just the latest message
+restated. Fold the latest exchange into the existing narrative; if it only
+answers a prior question ("yes," "$500," "I'm a rep"), merge that answer in
+rather than replacing the summary wholesale. If it corrects or contradicts
+something already in the summary, the correction wins. In addition: if the 
+user has indicated they don't know or can't determine something the AI asked about, 
+state that plainly in the summary (e.g. "They weren't sure of the exact dollar
+amount involved.") so that fact isn't lost from the narrative -- it may
+be needed to re-derive uncertain_fields in a future turn.
 """
 
 AMBIGUITY_SYSTEM_PROMPT = """You are given a user's question and a list of \
@@ -2039,11 +2396,6 @@ answer the situation (for example, a clause you found references a \
 definition you haven't been able to resolve, or the situation clearly \
 needs a rule you haven't seen candidates for), set sufficient=false and \
 describe what to search for next in `needs`. Otherwise set sufficient=true.
-
-Use your tools freely -- search_clauses_tool, get_clause_tool, \
-get_children_tool, get_parent_chain_tool, lookup_cross_reference_tool -- \
-whenever you need more information to be confident in your answer. Do not \
-guess at clause text you haven't actually retrieved.
 """
 
 SYNTHESIS_SYSTEM_PROMPT = """You write the final answer for a compliance \
