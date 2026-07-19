@@ -71,13 +71,17 @@ class SanitizeNoneContentMiddleware(AgentMiddleware):
                 msg.content = ""
         return handler(request)
 
-def _get_reasoner_agent():
+def _get_reasoner_agent(use_tools: bool = False):
     global _reasoner_agent
     if _reasoner_agent is None:
+        system_prompt = prompts.REASONER_SYSTEM_PROMPT
+        if use_tools:
+            system_prompt += prompts.REASONER_TOOL_INSTRUCTIONS
+
         _reasoner_agent = create_deep_agent(
             model=get_chat_model("reasoner"),
-            # tools=REASONER_TOOLS,
-            system_prompt= prompts.REASONER_SYSTEM_PROMPT,
+            tools=REASONER_TOOLS if use_tools else None,
+            system_prompt=system_prompt,
             response_format=ReasonerOutput,
             middleware=[SanitizeNoneContentMiddleware()],
         )
@@ -97,25 +101,27 @@ def reason_node(state: AgentState) -> dict:
     ]
     task = (
         f"Full situation: {state.get('situation_summary') or state['raw_query']}\n\n"
-        f"Known structured facts: {state.get('known_fields', {})}\n\n"
+        # f"Known structured facts: {state.get('known_fields', {})}\n\n"
         f"Candidate clauses gathered so far:\n{json.dumps(clause_summaries, indent=2)}"
     )
     
-    with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/artifacts/test1.txt", "w", encoding="utf-8",) as f:
-        f.write(task)
+    # with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/artifacts/test1.txt", "w", encoding="utf-8",) as f:
+    #     f.write(task)
 
     result = agent.invoke({"messages": [{"role": "user", "content": task}]})
     output: ReasonerOutput = result["structured_response"] # result["messages"][-1] 
 
-    graph = {c["clause_ref"]: c for c in state.get("clause_graph", [])}
+    initial_graph = {c["clause_ref"]: c for c in state.get("clause_graph", [])}
+    new_graph = {}
     for reasoned in output.clauses:
-        if reasoned.clause_ref in graph:
-            graph[reasoned.clause_ref]["relevance_role"] = reasoned.relevance_role
-            graph[reasoned.clause_ref]["reasoning"] = reasoned.reasoning
+        if reasoned.clause_ref in initial_graph:
+            new_graph[reasoned.clause_ref ] = initial_graph[reasoned.clause_ref]
+            new_graph[reasoned.clause_ref]["relevance_role"] = reasoned.relevance_role
+            new_graph[reasoned.clause_ref]["reasoning"] = reasoned.reasoning
         else:
             # The reasoner pulled in a clause via a tool call (e.g. a cross
             # reference) that wasn't in our pre-expanded set -- keep it.
-            graph[reasoned.clause_ref] = {
+            new_graph[reasoned.clause_ref] = {
                 "clause_ref": reasoned.clause_ref,
                 "payload": {},  # not fetched here; synthesis only needs clause_ref + reasoning
                 "relevance_role": reasoned.relevance_role,
@@ -127,7 +133,7 @@ def reason_node(state: AgentState) -> dict:
     hit_cap = cycles >= MAX_REASONING_CYCLES
 
     return {
-        "clause_graph": list(graph.values()),
+        "clause_graph": list(new_graph.values()),
         "conflicts": [c.model_dump() for c in output.conflicts],
         "out_of_scope": output.out_of_scope,
         "scope_note": output.scope_note,
@@ -162,9 +168,9 @@ def synthesize_node(state: AgentState) -> dict:
     llm = get_chat_model("reasoner")
     context = {
         "situation": state.get("situation_summary") or state["raw_query"],
-        "known_facts": state.get("known_fields", {}),
+        # "known_facts": state.get("known_fields", {}),
         "reasoned_clauses": [
-            {"clause_ref": c["clause_ref"], "role": c["relevance_role"], "reasoning": c["reasoning"]}
+            {"clause_ref": c["clause_ref"], "role": c["relevance_role"], "clause_actual_text": c["payload"]["merged_clause"], "reasoning": c["reasoning"]}
             for c in relevant
         ],
         "conflicts": state.get("conflicts", []),
