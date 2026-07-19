@@ -113,7 +113,7 @@ ACTIVE_EMBEDDING_MODEL = "voyage-law-2"
 ACTIVE_COLLECTION_NAME = EMBEDDING_MODELS[ACTIVE_EMBEDDING_MODEL]
  
 # How many candidate clauses to pull back per vector search call.
-RETRIEVAL_TOP_K = 20
+RETRIEVAL_TOP_K = 10
  
 # Safety cap: max clarifying questions asked before the agent gives its best
 # answer anyway (with caveats), so a confused user never gets stuck in a loop.
@@ -122,31 +122,6 @@ MAX_CLARIFICATION_TURNS = 3
 # Safety cap: max retrieve -> reason cycles within a single turn, in case the
 # reasoner keeps asking for "just one more search".
 MAX_REASONING_CYCLES = 3
-
-
-# ---------------------------------------------------------------------------
-# Previous version configurations
-# ---------------------------------------------------------------------------
-# ── Retrieval ─────────────────────────────────────────────────────────────────
-DEFAULT_TOP_K = 5
-
-# ── Clarification pipeline ────────────────────────────────────────────────────
-MAX_CLARIFY_QUESTIONS = 10   # one per field at most
-
-# ── Context window management (web server) ────────────────────────────────────
-# Warn user when context remaining drops below this percentage
-CONTEXT_WARN_THRESHOLD = 20
-# Hard-disable follow-up input below this percentage
-CONTEXT_HARD_LIMIT_PCT = 5
-
-# Truncate clauses at a shorter limit than the main reasoning prompt
-# because the follow-up prompt also includes the initial analysis,
-# making the context budget tighter.
-MAX_CLAUSE_CHARS = 1000
-# Truncate initial reasoning to prevent the context budget from being
-# dominated by the previous answer on long reasoning outputs.
-MAX_REASONING_CHARS = 5000
-# ---------------------------------------------------------------------------
 
 
 SERIES_MAP = {
