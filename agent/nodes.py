@@ -11,7 +11,7 @@ Every node function has the shape LangGraph expects:
 It reads whatever it needs from `state` and returns a dict of the fields it
 wants to update. Fields it doesn't return are left untouched.
 """
-
+import json
 from typing import Any, Optional, List
 
 from pydantic import BaseModel, Field
@@ -111,15 +111,28 @@ def intake_node(state: AgentState) -> dict:
     latest_user_query = state.get("raw_query")
     latest_ai_message = state.get("messages", [])[-1] if state.get("messages") else None
 
+    previous_gaps = json.dumps(
+        [
+            {
+                "field": field_dict["field"],
+                "detail": field_dict["detail"],
+            }
+            for field_dict in state.get("gaps", [])
+        ],
+        indent=2,
+    )
+
     if latest_ai_message and isinstance(latest_ai_message, AIMessage):
         context = (
             f"Situation summary so far: {previous_summary}\n\n"
+            f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet):\n{previous_gaps}\n\n"
             f"Latest interaction between system and user:\nAI: {latest_ai_message.content}\nUser: {latest_user_query}\n"
         )
     else:
         context = (
             f"Situation summary so far: {previous_summary}\n\n"
-            f"Latest user message: {latest_user_query}"
+            f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet):\n{previous_gaps}\n\n"
+            f"Latest interaction: {latest_user_query}"
         )
 
     extracted = llm.invoke([
@@ -289,19 +302,27 @@ def gap_analysis_node(state: AgentState) -> dict:
 # ---------------------------------------------------------------------------
 
 def clarify_node(state: AgentState) -> dict:
-    """Turn the most important gap (or the ambiguity question, if that's why
-    we're here) into one natural question and add it to the transcript."""
+    """Turn all open gaps (or the ambiguity question, if that's why we're
+    here) into a single combined question and add it to the transcript."""
     if state.get("is_ambiguous") and state.get("ambiguity_question"):
         question = state["ambiguity_question"]
     else:
         gaps = state.get("gaps", [])
         blocking = [g for g in gaps if g["determines_clause_applicability"]] or gaps
-        top_gap = blocking[0]
+
+        query_text = state.get("situation_summary") or state["raw_query"]
+        gaps_text = "\n".join(
+            f"- Missing detail: {g['detail']}\n  Why it matters: {g['why_it_matters']}"
+            for g in blocking
+        )
 
         llm = get_chat_model("clarify")
         response = llm.invoke([
             SystemMessage(content=prompts.CLARIFY_SYSTEM_PROMPT),
-            HumanMessage(content=f"Missing detail: {top_gap['detail']}\nWhy it matters: {top_gap['why_it_matters']}"),
+            HumanMessage(content=(
+                f"User's situation so far: {query_text}\n\n"
+                f"Missing details:\n{gaps_text}"
+            )),
         ])
         question = response.content
 
