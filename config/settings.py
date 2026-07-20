@@ -117,11 +117,11 @@ RETRIEVAL_TOP_K = 10
  
 # Safety cap: max clarifying questions asked before the agent gives its best
 # answer anyway (with caveats), so a confused user never gets stuck in a loop.
-MAX_CLARIFICATION_TURNS = 3
+MAX_CLARIFICATION_TURNS = 4
  
 # Safety cap: max retrieve -> reason cycles within a single turn, in case the
 # reasoner keeps asking for "just one more search".
-MAX_REASONING_CYCLES = 3
+MAX_REASONING_CYCLES = 4
 
 
 SERIES_MAP = {

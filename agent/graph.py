@@ -36,9 +36,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from agent.state import AgentState
 from agent.nodes import (
     intake_node,
-    ambiguity_node,
     retrieve_node,
-    gap_analysis_node,
+    clarification_check_node,
     clarify_node,
     expand_node,
 )
@@ -60,6 +59,13 @@ def _route_after_gaps(state: AgentState) -> str:
 def _route_after_reason(state: AgentState) -> str:
     return "retrieve" if state.get("needs_more_search") else "synthesize"
 
+def _route_after_clarification_check(state: AgentState) -> str:
+    if state.get("is_ambiguous"):
+        return "clarify"
+    blocking = [g for g in state.get("gaps", []) if g["determines_clause_applicability"]]
+    if blocking and state.get("clarification_count", 0) < MAX_CLARIFICATION_TURNS:
+        return "clarify"
+    return "expand"
 
 def build_graph():
     """Assemble and compile the graph. Call get_graph() instead of this
@@ -68,20 +74,22 @@ def build_graph():
     g = StateGraph(AgentState)
 
     g.add_node("intake", intake_node)
-    g.add_node("ambiguity_check", ambiguity_node)
+    g.add_node("clarification_check", clarification_check_node)   # was: ambiguity_check + gap_analysis
     g.add_node("clarify", clarify_node)
     g.add_node("retrieve", retrieve_node)
-    g.add_node("gap_analysis", gap_analysis_node)
     g.add_node("expand", expand_node)
     g.add_node("reason", reason_node)
     g.add_node("synthesize", synthesize_node)
 
     g.set_entry_point("intake")
     g.add_edge("intake", "retrieve")
-    g.add_edge("retrieve", "ambiguity_check")
-    g.add_conditional_edges("ambiguity_check", _route_after_ambiguity, {"clarify": "clarify", "gap_analysis": "gap_analysis"})
-    g.add_edge("clarify", END)  # pause; resumed by the NEXT run_turn() call, not within this one
-    g.add_conditional_edges("gap_analysis", _route_after_gaps, {"clarify": "clarify", "expand": "expand"})
+    g.add_edge("retrieve", "clarification_check")
+    g.add_conditional_edges(
+        "clarification_check",
+        _route_after_clarification_check,
+        {"clarify": "clarify", "expand": "expand"},
+    )
+    g.add_edge("clarify", END)
     g.add_edge("expand", "reason")
     g.add_conditional_edges("reason", _route_after_reason, {"retrieve": "retrieve", "synthesize": "synthesize"})
     g.add_edge("synthesize", END)

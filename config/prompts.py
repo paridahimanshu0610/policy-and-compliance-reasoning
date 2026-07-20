@@ -2011,6 +2011,14 @@ CRITICAL RULES
    "registered_representative" is met, don't also add "associated_person"
    just because a rep is also an associated person -- only add both if the
    situation is genuinely ambiguous between them per rule 4).
+6. You are also given the facts extracted last turn (known_fields_so_far).
+   This is a continuity aid, not a source of truth: if the situation summary
+   and latest exchange still support a value in known_fields_so_far, keep
+   extracting it even if the summary doesn't restate it in those exact words
+   this turn. But if the summary or latest exchange contradicts, narrows, or
+   drops a value from known_fields_so_far, the summary/latest exchange wins
+   -- never keep a value from known_fields_so_far that the current situation
+   no longer supports.
 
 FIELD-BY-FIELD CRITERIA
 ========================
@@ -2357,17 +2365,47 @@ exact dollar amount involved.") so that fact isn't lost from the narrative -- it
 be needed to re-derive uncertain_fields in a future turn.
 """
 
-AMBIGUITY_SYSTEM_PROMPT = """You are given a user's question/situation and a list of \
-candidate FINRA clauses that came back from a first-pass search, grouped by \
-what they're actually about. If the candidates split into two or more \
-clearly different topics/interpretations of similar relevance, the query is \
-ambiguous. If they're one coherent topic (even if several clauses are \
-needed together), it is NOT ambiguous -- multiple relevant clauses is \
-normal and not the same thing as an ambiguous question.
+CLARIFICATION_SYSTEM_PROMPT = """You are given a user's situation, the facts \
+already known about it, and a set of candidate FINRA clauses pulled from a \
+first-pass search (with their actual text). Decide two separate things:
 
-If ambiguous, write ONE short, friendly question that lists the \
-interpretations in plain language and asks the user which they mean. If \
-not ambiguous, say so.
+1. AMBIGUITY -- Is the user's underlying QUESTION itself open to more than \
+one meaning, where each meaning points at a genuinely different set of \
+clauses (e.g. "margin rules" could mean initial requirements, maintenance \
+requirements, or margin calls)? If so, is_ambiguous=true and write one \
+short, friendly question listing the interpretations in plain language.
+
+   Do NOT mark this ambiguous just because the candidates cover several \
+clauses, or because they have different field values from each other. \
+Clauses very often play different, complementary roles in ONE correct \
+answer -- a general rule alongside its own exception, a definition, or a \
+condition will routinely differ on fields like involves_third_party or \
+regulated_subject BY DESIGN, because that's what makes them a rule and an \
+exception rather than two copies of the same rule. That is normal and is \
+not ambiguity.
+
+2. GAPS -- Is there a specific fact about the user's situation, not yet in \
+"facts already known", that would change WHICH of these candidate clauses \
+actually apply (or whether a specific numeric threshold puts them on one \
+side of a line or another)? List each such fact as a gap. A gap must be \
+load-bearing: if you already know the answer would be complete and correct \
+without asking it, do NOT list it.
+
+   Common real gaps: the situation depends on a specific dollar amount / \
+percentage / count that hasn't been given (has_financial_threshold=true on \
+a candidate and no value provided yet); the entity type asking (retail vs. \
+institutional customer, carrying vs. introducing firm, broker-dealer vs. \
+registered rep) changes obligated_actor or applies_to_firm_type; whether a \
+customer or third party is involved changes which clause governs.
+
+   Do NOT list a gap just because two candidates have different field \
+values -- only when the missing fact would change which clause(s) belong \
+in the final answer for THIS situation.
+
+    If a fact is listed as one the user has already said they don't know, \
+never list it as a gap, even if a candidate clause depends on it -- treat \
+it as permanently unresolved for this conversation, not something to ask \
+about again.
 """
 
 CLARIFY_SYSTEM_PROMPT = """You are a compliance assistant. You will be \

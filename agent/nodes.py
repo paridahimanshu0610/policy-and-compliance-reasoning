@@ -32,39 +32,6 @@ from ingestion.build_vector_db import KEYWORD_FIELDS, BOOL_FIELDS
 class ExtractedFacts(BaseModel):
     """Only fields the message actually supports get filled in -- everything
     else stays None so we don't overwrite something we already knew with a
-    guess."""
-    obligated_actor: Optional[list[str]] = None
-    regulated_subject: Optional[list[str]] = None
-    activity_type: Optional[list[str]] = None
-    applies_to_firm_type: Optional[list[str]] = None
-    involves_customer: Optional[bool] = None
-    involves_third_party: Optional[bool] = None
-    has_financial_threshold: Optional[bool] = None
-    documentation_required: Optional[bool] = None
-    frequency: Optional[list[str]] = None
-    reporting_recipient: Optional[list[str]] = None
-    numeric_value: Optional[str] = Field(
-        default=None,
-        description="Any specific dollar amount, percentage, or count mentioned, as plain text (e.g. '$500', '10%').",
-    )
-    situation_summary: str = Field(
-        description="Updated 2-4 sentence plain-language summary of the FULL situation so far, not just this message.",
-    )
-    uncertain_fields: List[str] = Field(
-        default_factory=list,
-        description=(
-            "Complete current list of field names (matching the other field names in this "
-            "schema, e.g. 'numeric_value', 'obligated_actor') that the AI has explicitly asked "
-            "about and the user clearly indicated they don't know or can't find out. Recomputed "
-            "fresh from the full situation each turn -- drop a field from this list as soon as "
-            "the user provides any real answer for it, even a partial or ambiguous one."
-        ),
-    )
-
-
-class ExtractedFacts(BaseModel):
-    """Only fields the message actually supports get filled in -- everything
-    else stays None so we don't overwrite something we already knew with a
     guess. uncertain_fields is the exception: it's always a complete list,
     recomputed fresh each turn."""
     obligated_actor: Optional[list[str]] = None
@@ -125,21 +92,23 @@ def intake_node(state: AgentState) -> dict:
     if latest_ai_message and isinstance(latest_ai_message, AIMessage):
         context = (
             f"Situation summary so far: {previous_summary}\n\n"
+            f"Facts extracted last turn (continuity aid only -- see rule 6 under CRITICAL RULES): {known_so_far}\n\n"
             f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet):\n{previous_gaps}\n\n"
             f"Latest interaction between system and user:\nAI: {latest_ai_message.content}\nUser: {latest_user_query}\n"
         )
     else:
         context = (
             f"Situation summary so far: {previous_summary}\n\n"
+            f"Facts extracted last turn (continuity aid only -- see rule 6 under CRITICAL RULES): {known_so_far}\n\n"
             f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet):\n{previous_gaps}\n\n"
             f"Latest interaction: {latest_user_query}"
         )
-    print("Stated invoking the LLM")
+
     extracted = llm.invoke([
         SystemMessage(content=prompts.INTAKE_SYSTEM_PROMPT),
         HumanMessage(content=context),
     ])
-    print("Extracted the result.")
+
     extracted_fields = extracted.model_dump()
     new_summary = extracted_fields.pop("situation_summary")
     uncertain_fields = extracted_fields.pop("uncertain_fields") or []
@@ -210,102 +179,106 @@ def retrieve_node(state: AgentState) -> dict:
     }
 
 # ---------------------------------------------------------------------------
-# 3. Ambiguity check -- is the query itself open to >1 reading?
+# 3. Ambiguity and Gap check
 # ---------------------------------------------------------------------------
 
-class AmbiguityCheck(BaseModel):
-    is_ambiguous: bool
-    question: Optional[str] = Field(
-        default=None, description="If ambiguous, the one clarifying question to ask."
+class Gap(BaseModel):
+    detail: str
+    why_it_matters: str
+    determines_clause_applicability: bool
+    field: Optional[str] = Field(
+        default=None,
+        description="The known_fields key this gap would resolve, if it maps to one (e.g. 'applies_to_firm_type', 'numeric_value'). Null if it doesn't map cleanly to a single field.",
     )
 
 
-def ambiguity_node(state: AgentState) -> dict:
-    """Run a quick, unfiltered search and see whether the top results split
-    into more than one distinct topic. If they do, ask the LLM to phrase a
-    disambiguating question; if they don't, move straight to retrieval."""
-    # Priority: a specific follow-up the reasoner asked for > the running
-    # situation summary > the raw message, as a last-resort fallback only
-    # (raw_query alone is unreliable once the conversation is past turn 1 --
-    # it might just be "yes" or "$500").
-    query_text = state.get("needs_more_search") or state.get("situation_summary") or state["raw_query"]
+class ClarificationAssessment(BaseModel):
+    is_ambiguous: bool = Field(
+        description="True only if the user's question itself could mean genuinely different things, each pointing at a different set of clauses."
+    )
+    ambiguity_question: Optional[str] = Field(
+        default=None, description="If ambiguous, one short question listing the interpretations in plain language."
+    )
+    gaps: list[Gap] = Field(
+        default=[],
+        description="Missing facts that would change WHICH clause(s) apply. Do not list a gap just because candidates differ on some field -- only when that difference would change the outcome for this specific situation.",
+    )
 
-    hits = state.get("candidate_clauses", [])
-    # hits = vector_search(query_text, top_k=10)
 
-    if not hits:
-        return {"is_ambiguous": True, "ambiguity_question": "None of the FINRA clauses seem to apply to your situation. Could you please be more specific about your situation?"}
+# Fields worth showing the LLM alongside clause text, since they're the ones
+# that most often distinguish "this clause applies to you" from "it doesn't" --
+# NOT used for any Python-side clustering/diffing anymore, just as reading aids.
+_CONTEXT_FIELDS = [
+    "rule_id", "obligated_actor", "applies_to_firm_type", "involves_customer",
+    "involves_third_party", "has_financial_threshold", "frequency",
+]
 
-    top_score = hits[0]["score"]
-    # Only look at hits that are genuinely competitive with the top hit --
-    # a big score gap means the rest aren't real alternative interpretations.
-    close_hits = [h for h in hits if top_score - h["score"] < 0.08]
-    topic_clusters = {tuple(h["payload"].get("activity_type", [])) for h in close_hits}
 
-    if len(topic_clusters) < 2:
-        return {"is_ambiguous": False}
+def _format_candidate(c: dict) -> str:
+    payload = c["payload"]
+    tags = ", ".join(f"{f}={payload.get(f)}" for f in _CONTEXT_FIELDS if payload.get(f) not in (None, [], ""))
+    text = payload.get("merged_clause") or payload.get("original_clause") or ""
+    return f"[{c['clause_ref']}] ({tags})\n{text}"
 
-    llm = get_chat_model("ambiguity").with_structured_output(AmbiguityCheck)
-    summary_of_clusters = "\n".join(
-        f"- {h['payload'].get('rule_name', h['clause_ref'])}: {h['payload'].get('activity_type')}"
-        for h in close_hits
+
+def clarification_check_node(state: AgentState) -> dict:
+    """One LLM call, reading the actual candidate clause text, that decides
+    two things at once:
+      1. Is the user's question itself ambiguous (Situation 11)?
+      2. Is there a missing fact that would change WHICH clause(s) apply
+         (drives clarification for Situations 10, 12, and general
+         incompleteness)?
+
+    Deliberately NOT done by diffing payload field values in Python: two
+    clauses having different values for a field (e.g. a rule and its own
+    exception having different involves_third_party values) is completely
+    normal when they're playing different roles in the SAME answer -- that
+    is not ambiguity and not a gap. Only an LLM reading the actual clause
+    text can tell "these are alternatives" apart from "these are
+    complementary parts of one answer", so both checks are folded into a
+    single call over the same context instead of two separate heuristics
+    that can't see each other's reasoning.
+    """
+    candidates = state.get("candidate_clauses", [])[:8] # strongest hits only; keeps the prompt focused
+    known_fields = state.get("known_fields", {})
+
+    # A field the user later actually answers should stop being "uncertain" --
+    # known_fields wins if both are somehow set for the same field.
+    uncertain_fields = [f for f in state.get("uncertain_fields", []) if f not in known_fields]
+
+    if not candidates:
+        # No candidates at all isn't ambiguity -- it's a signal for
+        # out-of-scope (Situation 9), which reason_node already handles.
+        # Just let it flow through to expand/reason rather than faking a
+        # clarifying question that doesn't match anything.
+        return {"is_ambiguous": False, "gaps": []}
+
+    llm = get_chat_model("ambiguity").with_structured_output(ClarificationAssessment)
+    candidates_block = "\n\n".join(_format_candidate(c) for c in candidates)
+    context = (
+        f"Situation so far: {state.get('situation_summary') or state['raw_query']}\n"
+        f"Facts already known: {known_fields}\n"
+        f"Fields the user has already said they don't know -- never generate a gap for "
+        f"any of these, even if a candidate clause depends on it: {uncertain_fields}\n\n"
+        f"Candidate clauses:\n{candidates_block}"
     )
     result = llm.invoke([
-        SystemMessage(content=prompts.AMBIGUITY_SYSTEM_PROMPT),
-        HumanMessage(content=f"Situation so far: {query_text}\n\nCandidate topics found:\n{summary_of_clusters}"),
+        SystemMessage(content=prompts.CLARIFICATION_SYSTEM_PROMPT),
+        HumanMessage(content=context),
     ])
 
-    return {"is_ambiguous": result.is_ambiguous, "ambiguity_question": result.question}
+    gaps = [
+        g.model_dump() for g in result.gaps
+        if not (g.field and g.field in known_fields and known_fields[g.field] not in (None, [], ""))
+        and not (g.field and g.field in uncertain_fields)
+    ]
 
-
-# ---------------------------------------------------------------------------
-# 4. Gap analysis -- do the candidates need a fact we don't have yet?
-# ---------------------------------------------------------------------------
-
-# For each of these payload fields, if the top candidates disagree on its
-# value (some clauses apply to one value, others to a different one) and we
-# don't yet know the user's actual value, that's a gap worth asking about.
-_DISCRIMINATING_FIELDS = {
-    "applies_to_firm_type": "What type of firm or role you're asking about (e.g. broker-dealer vs. investor) changes which rule applies.",
-    "involves_customer": "Whether a customer is involved changes which rule applies.",
-    "involves_third_party": "Whether a third party outside your firm is involved changes which rule applies.",
-    "frequency": "How often this happens changes which rule applies.",
-}
-
-
-def gap_analysis_node(state: AgentState) -> dict:
-    """Rule-based diff: for each discriminating field, check whether the
-    current candidates disagree on it and whether we already know the
-    user's value. Also flags a numeric gap when a top candidate depends on
-    a dollar/percentage threshold we haven't been given (Situation 10)."""
-    known_fields = state.get("known_fields", {})
-    candidates = state.get("candidate_clauses", [])[:8]  # only look at the strongest hits
-    uncertain_fields = state.get("uncertain_fields", []) 
-    gaps = []
-
-    for field, why in _DISCRIMINATING_FIELDS.items():
-        if (known_fields.get(field, None) is not None) or (field in uncertain_fields):
-            continue  # already known, nothing to ask
-        values_seen = {tuple(c["payload"].get(field, [])) if isinstance(c["payload"].get(field), list)
-                        else c["payload"].get(field) for c in candidates}
-        if len(values_seen) > 1:
-            gaps.append({
-                "detail": f"whether {field.replace('_', ' ')} applies to your situation",
-                "why_it_matters": why,
-                "determines_clause_applicability": True,
-                "field": field,
-            })
-
-    # if any(c["payload"].get("has_financial_threshold") for c in candidates) and not known_fields.get("numeric_value"):
-    if known_fields.get("has_financial_threshold", None) and known_fields.get("numeric_value", None) is None:
-        gaps.append({
-            "detail": "the specific dollar amount, percentage, or count involved",
-            "why_it_matters": "This rule's requirement depends on a specific number, and different amounts can trigger different obligations.",
-            "determines_clause_applicability": True,
-            "field": "numeric_value",
-        })
-
-    return {"gaps": gaps}
+    return {
+        "is_ambiguous": result.is_ambiguous,
+        "ambiguity_question": result.ambiguity_question,
+        "gaps": gaps,
+        "uncertain_fields": uncertain_fields,  # carried forward, cleaned of anything now resolved
+    }
 
 
 # ---------------------------------------------------------------------------
