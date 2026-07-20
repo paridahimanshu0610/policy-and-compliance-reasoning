@@ -43,6 +43,58 @@ def vector_search(query_text: str, filter_conditions: dict | None = None, top_k:
         collection_name=ACTIVE_COLLECTION_NAME,
     )
 
+def filter_hits(
+    hits: list[dict],
+    filter_conditions: dict | None = None,
+) -> list[dict]:
+    """
+    Apply the same filtering logic used in search_clauses() to an
+    existing list of Qdrant search results.
+
+    Semantics:
+    - bool filter -> exact match
+    - list filter -> MatchAny (intersection is non-empty)
+    - scalar filter -> exact match
+    """
+
+    if not filter_conditions:
+        return hits
+
+    def matches(payload: dict, field: str, filter_value) -> bool:
+        payload_value = payload.get(field)
+
+        # MatchValue for booleans
+        if isinstance(filter_value, bool):
+            return payload_value == filter_value
+
+        # MatchAny
+        elif isinstance(filter_value, list):
+            if payload_value is None:
+                return False
+
+            # Qdrant MatchAny is typically used against payload arrays,
+            # but handle scalar payload values defensively.
+            if isinstance(payload_value, list):
+                return any(v in payload_value for v in filter_value)
+            else:
+                return payload_value in filter_value
+
+        # MatchValue for scalars
+        else:
+            return payload_value == filter_value
+
+    filtered_hits = []
+
+    for hit in hits:
+        payload = hit.get("payload", {})
+
+        if all(
+            matches(payload, field, value)
+            for field, value in filter_conditions.items()
+        ):
+            filtered_hits.append(hit)
+
+    return filtered_hits
 
 def get_clause(clause_ref: str) -> dict | None:
     """Fetch one clause's full payload by its exact clause_ref."""

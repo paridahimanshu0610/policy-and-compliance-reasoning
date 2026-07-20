@@ -129,7 +129,7 @@ def reason_node(state: AgentState) -> dict:
                 "provenance": "reasoner_tool_call",
             }
 
-    cycles = state.get("reasoning_cycles", 0)
+    cycles = state.get("reasoning_cycles", 0) + 1
     hit_cap = cycles >= MAX_REASONING_CYCLES
 
     return {
@@ -140,6 +140,7 @@ def reason_node(state: AgentState) -> dict:
         # Stop looping once we hit the cap even if the reasoner still wants more --
         # better to answer with caveats than loop forever.
         "needs_more_search": None if (output.sufficient or hit_cap) else output.needs,
+        "reasoning_cycles": cycles,
     }
 
 

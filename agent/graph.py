@@ -47,7 +47,7 @@ from config.settings import MAX_CLARIFICATION_TURNS
 
 
 def _route_after_ambiguity(state: AgentState) -> str:
-    return "clarify" if state.get("is_ambiguous") else "retrieve"
+    return "clarify" if state.get("is_ambiguous") else "gap_analysis"
 
 
 def _route_after_gaps(state: AgentState) -> str:
@@ -77,10 +77,10 @@ def build_graph():
     g.add_node("synthesize", synthesize_node)
 
     g.set_entry_point("intake")
-    g.add_edge("intake", "ambiguity_check")
-    g.add_conditional_edges("ambiguity_check", _route_after_ambiguity, {"clarify": "clarify", "retrieve": "retrieve"})
+    g.add_edge("intake", "retrieve")
+    g.add_edge("retrieve", "ambiguity_check")
+    g.add_conditional_edges("ambiguity_check", _route_after_ambiguity, {"clarify": "clarify", "gap_analysis": "gap_analysis"})
     g.add_edge("clarify", END)  # pause; resumed by the NEXT run_turn() call, not within this one
-    g.add_edge("retrieve", "gap_analysis")
     g.add_conditional_edges("gap_analysis", _route_after_gaps, {"clarify": "clarify", "expand": "expand"})
     g.add_edge("expand", "reason")
     g.add_conditional_edges("reason", _route_after_reason, {"retrieve": "retrieve", "synthesize": "synthesize"})

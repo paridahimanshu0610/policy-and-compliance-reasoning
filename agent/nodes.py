@@ -20,7 +20,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from agent.state import AgentState
 from agent.llm import get_chat_model
 from config import prompts 
-from agent.retrieval_tools import vector_search, get_parent_chain, get_children
+from agent.retrieval_tools import vector_search, filter_hits, get_parent_chain, get_children
 from config.settings import MAX_CLARIFICATION_TURNS
 from ingestion.build_vector_db import KEYWORD_FIELDS, BOOL_FIELDS
 
@@ -134,12 +134,12 @@ def intake_node(state: AgentState) -> dict:
             f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet):\n{previous_gaps}\n\n"
             f"Latest interaction: {latest_user_query}"
         )
-
+    print("Stated invoking the LLM")
     extracted = llm.invoke([
         SystemMessage(content=prompts.INTAKE_SYSTEM_PROMPT),
         HumanMessage(content=context),
     ])
-
+    print("Extracted the result.")
     extracted_fields = extracted.model_dump()
     new_summary = extracted_fields.pop("situation_summary")
     uncertain_fields = extracted_fields.pop("uncertain_fields") or []
@@ -165,9 +165,52 @@ def intake_node(state: AgentState) -> dict:
         "messages": [HumanMessage(content=state["raw_query"])],
     }
 
+# ---------------------------------------------------------------------------
+# 2. Retrieve -- hybrid metadata-filtered vector search
+# ---------------------------------------------------------------------------
+
+_FILTERABLE_FIELDS = set(KEYWORD_FIELDS) | set(BOOL_FIELDS)
+
+def retrieve_node(state: AgentState) -> dict:
+    """Build a Qdrant filter out of whatever known_fields overlap with the
+    clause payload's actual filterable fields, then search. If the reasoner
+    asked for a specific follow-up search (needs_more_search), that text is
+    used as the query instead of the original question."""
+    known_fields = state.get("known_fields", {})
+    filter_conditions = {
+        field: value for field, value in known_fields.items()
+        if field in _FILTERABLE_FIELDS and value not in (None, [], "", False)
+    }
+
+    # Priority: a specific follow-up the reasoner asked for > the running
+    # situation summary > the raw message, as a last-resort fallback only
+    # (raw_query alone is unreliable once the conversation is past turn 1 --
+    # it might just be "yes" or "$500").
+    query_text = state.get("needs_more_search") or state.get("situation_summary") or state["raw_query"]
+    # filtered_hits = vector_search(query_text, filter_conditions=filter_conditions or None)
+    hits = vector_search(query_text, filter_conditions=None)
+
+    # Filter the hits:
+    filtered_hits = []
+    if filter_conditions:
+        filtered_hits = filter_hits(hits, filter_conditions=filter_conditions)
+
+    # If a strict filter starved the results, retry without it rather than
+    # returning an empty/weak set -- better to over-fetch and let the
+    # reasoner discard irrelevant ones than to miss the right clause because
+    # of an over-confident filter.
+    # if len(filtered_hits) < 3 and filter_conditions:
+    #     hits = vector_search(query_text, filter_conditions=None)
+    if len(filtered_hits) >= 4:
+        hits = filtered_hits
+
+    return {
+        "candidate_clauses": hits,
+        "needs_more_search": None,  # consumed
+    }
 
 # ---------------------------------------------------------------------------
-# 2. Ambiguity check -- is the query itself open to >1 reading?
+# 3. Ambiguity check -- is the query itself open to >1 reading?
 # ---------------------------------------------------------------------------
 
 class AmbiguityCheck(BaseModel):
@@ -181,10 +224,17 @@ def ambiguity_node(state: AgentState) -> dict:
     """Run a quick, unfiltered search and see whether the top results split
     into more than one distinct topic. If they do, ask the LLM to phrase a
     disambiguating question; if they don't, move straight to retrieval."""
-    query_text = state.get("situation_summary") or state["raw_query"]
-    hits = vector_search(query_text, top_k=10)
+    # Priority: a specific follow-up the reasoner asked for > the running
+    # situation summary > the raw message, as a last-resort fallback only
+    # (raw_query alone is unreliable once the conversation is past turn 1 --
+    # it might just be "yes" or "$500").
+    query_text = state.get("needs_more_search") or state.get("situation_summary") or state["raw_query"]
+
+    hits = state.get("candidate_clauses", [])
+    # hits = vector_search(query_text, top_k=10)
+
     if not hits:
-        return {"is_ambiguous": False}
+        return {"is_ambiguous": True, "ambiguity_question": "None of the FINRA clauses seem to apply to your situation. Could you please be more specific about your situation?"}
 
     top_score = hits[0]["score"]
     # Only look at hits that are genuinely competitive with the top hit --
@@ -206,45 +256,6 @@ def ambiguity_node(state: AgentState) -> dict:
     ])
 
     return {"is_ambiguous": result.is_ambiguous, "ambiguity_question": result.question}
-
-
-# ---------------------------------------------------------------------------
-# 3. Retrieve -- hybrid metadata-filtered vector search
-# ---------------------------------------------------------------------------
-
-_FILTERABLE_FIELDS = set(KEYWORD_FIELDS) | set(BOOL_FIELDS)
-
-
-def retrieve_node(state: AgentState) -> dict:
-    """Build a Qdrant filter out of whatever known_fields overlap with the
-    clause payload's actual filterable fields, then search. If the reasoner
-    asked for a specific follow-up search (needs_more_search), that text is
-    used as the query instead of the original question."""
-    known_fields = state.get("known_fields", {})
-    filter_conditions = {
-        field: value for field, value in known_fields.items()
-        if field in _FILTERABLE_FIELDS and value not in (None, [], "", False)
-    }
-
-    # Priority: a specific follow-up the reasoner asked for > the running
-    # situation summary > the raw message, as a last-resort fallback only
-    # (raw_query alone is unreliable once the conversation is past turn 1 --
-    # it might just be "yes" or "$500").
-    query_text = state.get("needs_more_search") or state.get("situation_summary") or state["raw_query"]
-    hits = vector_search(query_text, filter_conditions=filter_conditions or None)
-
-    # If a strict filter starved the results, retry without it rather than
-    # returning an empty/weak set -- better to over-fetch and let the
-    # reasoner discard irrelevant ones than to miss the right clause because
-    # of an over-confident filter.
-    if len(hits) < 3 and filter_conditions:
-        hits = vector_search(query_text, filter_conditions=None)
-
-    return {
-        "candidate_clauses": hits,
-        "needs_more_search": None,  # consumed
-        "reasoning_cycles": state.get("reasoning_cycles", 0) + 1,
-    }
 
 
 # ---------------------------------------------------------------------------
