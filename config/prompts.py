@@ -2347,17 +2347,17 @@ uncertain_fields (list of field names, always returned -- can be empty)
 situation_summary (string, required) -- updated 2-4 sentence plain-language
 description of the person's FULL situation as currently understood -- a
 coherent narrative, not a list of facts, and not just the latest message
-restated. Fold the latest exchange into the existing narrative; if it only
+restated. Refer to the latest exchange to update the existing narrative; if it only
 answers a prior question ("yes," "$500," "I'm a rep"), merge that answer in
 rather than replacing the summary wholesale. If it corrects or contradicts
 something already in the summary, the correction wins. In addition: if the 
 user has indicated they don't know or can't determine something that they were 
-asked about, state that plainly in the summary (e.g. "They weren't sure of the 
+asked about, state that concisely and plainly in the summary (e.g. "The user isn't sure of the 
 exact dollar amount involved.") so that fact isn't lost from the narrative -- it may
 be needed to re-derive uncertain_fields in a future turn.
 """
 
-AMBIGUITY_SYSTEM_PROMPT = """You are given a user's question and a list of \
+AMBIGUITY_SYSTEM_PROMPT = """You are given a user's question/situation and a list of \
 candidate FINRA clauses that came back from a first-pass search, grouped by \
 what they're actually about. If the candidates split into two or more \
 clearly different topics/interpretations of similar relevance, the query is \
