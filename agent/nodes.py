@@ -20,7 +20,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from agent.state import AgentState
 from agent.llm import get_chat_model
 from config import prompts 
-from agent.retrieval_tools import vector_search, filter_hits, get_parent_chain, get_children
+from agent.retrieval_tools import vector_search, filter_hits, get_parent, get_children
 from config.settings import MAX_CLARIFICATION_TURNS
 from ingestion.build_vector_db import KEYWORD_FIELDS, BOOL_FIELDS
 
@@ -331,7 +331,7 @@ def expand_node(state: AgentState) -> dict:
     for candidate in state.get("candidate_clauses", []):
         _add_to_graph(existing, candidate["clause_ref"], candidate["payload"], "retrieved")
 
-        # for parent in get_parent_chain(candidate["clause_ref"]):
+        # for parent in get_parent(candidate["clause_ref"]):
         #     _add_to_graph(existing, parent["clause_ref"], parent, "parent")
 
         # for child in get_children(candidate["clause_ref"]):

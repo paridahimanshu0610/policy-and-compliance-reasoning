@@ -11,7 +11,7 @@ Import as a module:
 import json
 import time
 import uuid
-from typing import Any
+from typing import Any, Union
 from .embedders import get_embedder
 
 from qdrant_client import QdrantClient
@@ -301,26 +301,54 @@ def search_clauses(
     ]
 
 def get_clause_by_ref(
-    clause_ref: str,
+    clause_ref: Union[str, list[str]],
     collection_name: str = COLLECTION_NAME,
-) -> dict | None:
+) -> Union[dict, list[dict | None], None]:
     """
-    Fetch one clause's full payload directly by its clause_ref -- no vector
-    search involved. Use this when you already know exactly which clause you
-    want, e.g. while walking up a parent chain, or fetching a clause that a
-    cross-reference lookup identified by name.
- 
-    Returns None if no clause with that clause_ref exists in the collection.
+    Fetch one or more clauses' full payloads directly by clause_ref -- no
+    vector search involved. Use this when you already know exactly which
+    clause(s) you want, e.g. while walking up a parent chain, fetching
+    children identified by a prior lookup, or resolving a batch of
+    cross-references at once.
+
+    - If `clause_ref` is a single string: returns that clause's payload dict,
+      or None if it doesn't exist in the collection.
+    - If `clause_ref` is a list of strings: returns a list of payload dicts
+      in the same order as the input, with None in place of any clause_ref
+      that wasn't found.
     """
-    point_id = clause_ref_to_uuid(clause_ref)
+    is_single = isinstance(clause_ref, str)
+    refs = [clause_ref] if is_single else clause_ref
+
+    if not refs:
+        return [] if not is_single else None
+
+    id_to_ref = {clause_ref_to_uuid(ref): ref for ref in refs}
+    point_ids = list(id_to_ref.keys())
+
     results = client.retrieve(
         collection_name=collection_name,
-        ids=[point_id],
+        ids=point_ids,
         with_payload=True,
     )
-    if not results:
-        return None
-    return results[0].payload
+
+    # Map found results back to their clause_ref, since Qdrant may return
+    # fewer points than requested (missing ids are simply omitted) and
+    # doesn't guarantee input order.
+    found_by_id = {str(point.id): point.payload for point in results}
+
+    payloads = [
+        found_by_id.get(str(pid))
+        for pid, ref in id_to_ref.items()
+    ]
+    # Reorder to match original `refs` order (dict preserves insertion order
+    # from `refs`, so this is already aligned, but being explicit below).
+    ref_to_payload = dict(zip(id_to_ref.values(), payloads))
+    ordered_payloads = [ref_to_payload[ref] for ref in refs]
+
+    if is_single:
+        return ordered_payloads[0]
+    return ordered_payloads
  
  
 def get_children(

@@ -17,10 +17,11 @@ actually knows how to talk to Qdrant.
 """
 
 import re
-
+from typing import List, Dict, Any, Union
+import json
 from langchain_core.tools import tool
 
-from config.settings import ACTIVE_COLLECTION_NAME, ACTIVE_EMBEDDING_MODEL, RETRIEVAL_TOP_K
+from config.settings import NORMALIZED_CHECKPOINT, ACTIVE_COLLECTION_NAME, ACTIVE_EMBEDDING_MODEL, RETRIEVAL_TOP_K
 from ingestion.build_vector_db import search_clauses, get_clause_by_ref, get_children as _get_children, generate_query_embeddings
 
 
@@ -96,17 +97,97 @@ def filter_hits(
 
     return filtered_hits
 
-def get_clause(clause_ref: str) -> dict | None:
+def get_clause(clause_ref: Union[str, list[str]],) -> dict | None:
     """Fetch one clause's full payload by its exact clause_ref."""
     return get_clause_by_ref(clause_ref, collection_name=ACTIVE_COLLECTION_NAME)
 
+def _load_jsonl(path: str) -> list[dict]:
+    with open(path, "r", encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
 
-def get_children(clause_ref: str) -> list[dict]:
+def _tokenize(clause_ref: str):
+    """
+    Split a clause_ref into (root, tokens) where tokens is the ordered list
+    of hierarchical segments, e.g.:
+        "FINRA-3110(b)(6)(C)(ii)a.1." ->
+        ("FINRA-3110", ["(b)", "(6)", "(C)", "(ii)", "a.", "1."])
+    """
+    token_pattern = re.compile(r'\([^()]+\)|[A-Za-z0-9]+\.')
+    tokens = token_pattern.findall(clause_ref)
+
+    # root = everything before the first matched token
+    first_match = token_pattern.search(clause_ref)
+    root = clause_ref[:first_match.start()] if first_match else clause_ref
+
+    # sanity check: reconstructing root+tokens should give back the original string
+    # (helps catch malformed clause_refs)
+    reconstructed = root + "".join(tokens)
+    if reconstructed != clause_ref:
+        raise ValueError(f"Could not fully tokenize clause_ref: {clause_ref!r}")
+
+    return root, tokens
+
+
+def get_children_clause_ref(
+    clause_ref: str,
+    include_grandchildren: bool = False,
+    include_all_keys: bool = False
+) -> List[Dict[str, Any]]:
+    """
+    Return all dicts in `data` whose clause_ref is a descendant of `clause_ref`.
+
+    - If include_grandchildren is False (default): only immediate children.
+    - If True: all descendants at any depth (children, grandchildren, ...).
+
+    Raises ValueError if clause_ref itself isn't found in data (optional safety check
+    -- remove if you don't want this).
+    """
+    try:
+        parent_root, parent_tokens = _tokenize(clause_ref)
+    except ValueError:
+        raise ValueError(f"Could not parse the given clause_ref: {clause_ref!r}")
+
+    data = _load_jsonl(NORMALIZED_CHECKPOINT)
+    key = "clause_ref"
+
+    parent_depth = len(parent_tokens)
+    results = []
+
+    for item in data:
+        candidate = item.get(key)
+        if candidate is None or candidate == clause_ref:
+            continue
+        try:
+            cand_root, cand_tokens = _tokenize(candidate)
+        except ValueError:
+            # skip unparsable entries rather than crashing the whole search
+            continue
+
+        if cand_root != parent_root:
+            continue
+        if len(cand_tokens) <= parent_depth:
+            continue
+        if cand_tokens[:parent_depth] != parent_tokens:
+            continue
+
+        if include_grandchildren:
+            results.append(item)
+        else:
+            if len(cand_tokens) == parent_depth + 1:
+                results.append(item)
+
+    if not include_all_keys:
+        return [clause[key] for clause in results]
+        
+    return results
+
+def get_children(clause_ref: str, include_grandchildren: bool = False) -> list[dict]:
     """Fetch every clause whose parent_clause points at clause_ref."""
-    return _get_children(clause_ref, collection_name=ACTIVE_COLLECTION_NAME)
+    children_clause_refs = get_children_clause_ref(clause_ref, include_grandchildren = include_grandchildren, include_all_keys = False)
+    return get_clause(children_clause_refs)
 
 
-def get_parent_chain(clause_ref: str, max_depth: int = 10) -> list[dict]:
+def get_parent(clause_ref: str, include_all_ancestors: bool = False) -> list[dict]:
     """
     Walk UP the hierarchy from clause_ref: parent, grandparent, and so on,
     until there's no parent_clause left (or max_depth is hit as a safety
@@ -116,6 +197,8 @@ def get_parent_chain(clause_ref: str, max_depth: int = 10) -> list[dict]:
     chain = []
     current = get_clause(clause_ref)
     seen = {clause_ref}
+    
+    max_depth = 10 if include_all_ancestors else 1
 
     for _ in range(max_depth):
         if not current:
@@ -185,23 +268,46 @@ def lookup_cross_reference(reference_text: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @tool
-def search_clauses_tool(query: str, activity_type: list[str] | None = None,
-                         applies_to_firm_type: list[str] | None = None) -> list[dict]:
+def search_clauses_tool(
+    query: str,
+    activity_type: list[str] | None = None,
+    applies_to_firm_type: list[str] | None = None,
+    documentation_required: bool | None = None,
+    frequency: list[str] | None = None,
+    has_financial_threshold: bool | None = None,
+    involves_customer: bool | None = None,
+    involves_third_party: bool | None = None,
+    obligated_actor: list[str] | None = None,
+    regulated_subject: list[str] | None = None,
+    reporting_recipient: list[str] | None = None,
+    rule_category: list[str] | None = None,
+    rule_id: list[str] | None = None,
+) -> list[dict]:
     """Semantic search over the FINRA clause database. Use this to find
-    clauses related to a topic. Optionally narrow results with
-    activity_type and/or applies_to_firm_type if you already know them."""
-    filters = {}
-    if activity_type:
-        filters["activity_type"] = activity_type
-    if applies_to_firm_type:
-        filters["applies_to_firm_type"] = applies_to_firm_type
+    clauses related to a topic. Optionally narrow results with any of the
+    metadata filters below if you already know them."""
+    kwargs = {
+        "activity_type": activity_type,
+        "applies_to_firm_type": applies_to_firm_type,
+        "documentation_required": documentation_required,
+        "frequency": frequency,
+        "has_financial_threshold": has_financial_threshold,
+        "involves_customer": involves_customer,
+        "involves_third_party": involves_third_party,
+        "obligated_actor": obligated_actor,
+        "regulated_subject": regulated_subject,
+        "reporting_recipient": reporting_recipient,
+        "rule_category": rule_category,
+        "rule_id": rule_id,
+    }
+    filters = {k: v for k, v in kwargs.items() if v is not None and v != []}
     return vector_search(query, filter_conditions=filters or None)
 
 
 @tool
-def get_clause_tool(clause_ref: str) -> dict | None:
-    """Fetch the full text and metadata of one specific clause, by its exact
-    clause_ref. Use this when you know precisely which clause you want."""
+def get_clause_tool(clause_ref: Union[str, list[str]]) -> dict | None:
+    """Fetch the full text and metadata of one clause or a list of clauses, by their 
+    exact clause_ref. Use this when you know precisely which clause(s) you want."""
     return get_clause(clause_ref)
 
 
@@ -213,10 +319,10 @@ def get_children_tool(clause_ref: str) -> list[dict]:
 
 
 @tool
-def get_parent_chain_tool(clause_ref: str) -> list[dict]:
-    """Fetch the parent, grandparent, etc. of a given clause_ref, in order.
+def get_parent_tool(clause_ref: str) -> list[dict]:
+    """Fetch the parent of a given clause_ref.
     Use this to see the broader obligation a specific clause sits under."""
-    return get_parent_chain(clause_ref)
+    return get_parent(clause_ref)
 
 
 @tool
@@ -232,6 +338,6 @@ REASONER_TOOLS = [
     search_clauses_tool,
     get_clause_tool,
     get_children_tool,
-    get_parent_chain_tool,
-    lookup_cross_reference_tool,
+    get_parent_tool,
+    # lookup_cross_reference_tool,
 ]

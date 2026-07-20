@@ -2543,7 +2543,7 @@ suspect exists but wasn't retrieved.
 - `get_clause_tool`: fetch one specific clause by its exact clause_ref.
 - `get_children_tool`: fetch sub-clauses of a clause_ref, to check for \
 more specific sub-provisions.
-- `get_parent_chain_tool`: fetch the parent/grandparent chain of a \
+- `get_parent_tool`: fetch the parent/grandparent chain of a \
 clause_ref, to see the broader obligation it sits under.
 - `lookup_cross_reference_tool`: resolve a lateral reference found inside \
 a clause's text (e.g. "see Rule 4512," "as defined above") to the actual \

@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR              = BASE_DIR / "data"
 CHROMA_PATH           = DATA_DIR / "chromadb"
 PARSED_CHECKPOINT     = DATA_DIR / "parsed_rules.json"
-NORMALIZED_CHECKPOINT = DATA_DIR / "normalized_documents.jsonl"
+NORMALIZED_CHECKPOINT = DATA_DIR / "aggregate_normalized_clauses.jsonl"
 HTML_DIR = DATA_DIR / "FINRA_Rules"
 
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
