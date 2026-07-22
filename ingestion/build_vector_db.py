@@ -26,7 +26,11 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
     MatchAny,
+    SparseVectorParams,
+    SparseVector,
+    Modifier,
 )
+from fastembed import SparseTextEmbedding
 
 import os
 from dotenv import load_dotenv
@@ -44,8 +48,20 @@ load_dotenv()
 # text-embedding-3-small: Embedding dimension = 1536 | Collection name = "text_embedded_clauses"
 # Octen-Embedding-8B: Embedding dimension = 4096 | Collection name = "octen_embedded_clauses"
 # Qwen3-Embedding-8B: Embedding dimension = 4096 | Collection name = "qwen_embedded_clauses"
-COLLECTION_NAME = "voyage_embedded_clauses"  # Qdrant collection name for FINRA clauses
+COLLECTION_NAME = "voyage_embedded_clauses_new"  # Qdrant collection name for FINRA clauses
 VECTOR_DIM = 1024
+
+# Name of the dense vector on each point (now required since we're adding a
+# second, named sparse vector alongside it — Qdrant doesn't allow mixing an
+# unnamed default vector with named vectors on the same point).
+DENSE_VECTOR_NAME = "dense"
+
+# Name of the BM25 sparse vector computed over `original_clause`.
+BM25_VECTOR_NAME = "bm25"
+BM25_MODEL_NAME = "Qdrant/bm25"
+
+# Loaded once at import time; reused across all build_point calls.
+_bm25_model = SparseTextEmbedding(model_name=BM25_MODEL_NAME)
 
 KEYWORD_FIELDS = [
     "clause_ref",
@@ -94,10 +110,17 @@ def create_collection(collection_name: str = COLLECTION_NAME) -> None:
 
     client.create_collection(
         collection_name=collection_name,
-        vectors_config=VectorParams(
-            size=VECTOR_DIM,
-            distance=Distance.COSINE,  # Best for normalized text embeddings
-        ),
+        vectors_config={
+            DENSE_VECTOR_NAME: VectorParams(
+                size=VECTOR_DIM,
+                distance=Distance.COSINE,  # Best for normalized text embeddings
+            ),
+        },
+        sparse_vectors_config={
+            BM25_VECTOR_NAME: SparseVectorParams(
+                modifier=Modifier.IDF,  # Enables BM25's IDF term
+            ),
+        },
         hnsw_config=HnswConfigDiff(
             m=16,                      # Fine for now; bump to 32 at 50k if recall dips
             ef_construct=200,          # Higher than default for better index quality
@@ -178,15 +201,28 @@ def clause_ref_to_uuid(clause_ref: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, clause_ref))
 
 
+def compute_bm25_sparse_vector(text: str) -> SparseVector:
+    """Compute a BM25 sparse vector for the given text using fastembed."""
+    embedding = list(_bm25_model.embed([text]))[0]
+    return SparseVector(
+        indices=embedding.indices.tolist(),
+        values=embedding.values.tolist(),
+    )
+
+
 # --------------------------------------------------------------------------
 # Point construction
 # --------------------------------------------------------------------------
 
 def build_point(clause: dict) -> PointStruct:
     """Convert a raw clause dict into a Qdrant PointStruct."""
+    original_clause = to_str(clause.get("original_clause"))
     return PointStruct(
         id=clause_ref_to_uuid(clause["clause_ref"]),
-        vector=clause["embedding"],
+        vector={
+            DENSE_VECTOR_NAME: clause["embedding"],
+            BM25_VECTOR_NAME: compute_bm25_sparse_vector(original_clause),
+        },
         payload={
             # String fields
             "clause_ref":   clause["clause_ref"],
@@ -195,7 +231,7 @@ def build_point(clause: dict) -> PointStruct:
             "rule_category": clause["rule_category"],
             "rule_url":     clause["rule_url"],
             "parent_clause": to_str(clause.get("parent_clause")),
-            "original_clause": to_str(clause.get("original_clause")),
+            "original_clause": original_clause,
             "merged_clause":   to_str(clause.get("merged_clause")),
             # List fields — always normalized
             "obligated_actor":      to_list(clause.get("obligated_actor")),
@@ -249,14 +285,22 @@ def upsert_clauses(
 # --------------------------------------------------------------------------
 
 def search_clauses(
-    query_embedding: list[float],
+    query_embedding: list[float] | None = None,
+    query_text: str | None = None,
+    search_mode: str = "dense",  # "dense" | "sparse"
     top_k: int = 20,
     filter_conditions: dict = None,
     collection_name: str = COLLECTION_NAME,
 ) -> list[dict]:
     """
-    Search for clauses using vector similarity with optional metadata filters.
- 
+    Search for clauses using either dense (semantic) or sparse (BM25 keyword)
+    similarity, with optional metadata filters.
+
+    search_mode:
+        "dense"  -> requires query_embedding, searches the DENSE_VECTOR_NAME vector.
+        "sparse" -> requires query_text, computes a BM25 sparse vector and
+                    searches the BM25_VECTOR_NAME vector.
+
     filter_conditions example:
     {
         "involves_customer": True,
@@ -264,8 +308,23 @@ def search_clauses(
         "applies_to_firm_type": ["broker_dealer"],
     }
     """
+    if search_mode not in ("dense", "sparse"):
+        raise ValueError(f"search_mode must be 'dense' or 'sparse', got: {search_mode!r}")
+
+    print("search_mode: ", search_mode)
+    if search_mode == "dense":
+        if query_embedding is None:
+            raise ValueError("query_embedding is required when search_mode='dense'")
+        query = query_embedding
+        using = DENSE_VECTOR_NAME
+    else:
+        if query_text is None:
+            raise ValueError("query_text is required when search_mode='sparse'")
+        query = compute_bm25_sparse_vector(query_text)
+        using = BM25_VECTOR_NAME
+
     must_conditions = []
- 
+
     if filter_conditions:
         for field, value in filter_conditions.items():
             if isinstance(value, bool):
@@ -280,22 +339,23 @@ def search_clauses(
                 must_conditions.append(
                     FieldCondition(key=field, match=MatchValue(value=value))
                 )
- 
+
     search_filter = Filter(must=must_conditions) if must_conditions else None
- 
+
     response = client.query_points(
         collection_name=collection_name,
-        query=query_embedding,
+        query=query,
+        using=using,
         query_filter=search_filter,
         limit=top_k,
         with_payload=True,
     )
- 
+
     return [
         {
             "clause_ref": r.payload["clause_ref"],
             "score": r.score,
-            "payload": r.payload,
+            "payload": {k: v for k, v in r.payload.items() if k != "original_clause"},
         }
         for r in response.points
     ]
@@ -610,19 +670,6 @@ def retrieval_eval(model_name="voyage-law-2"):
     with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/data/evals/situation3/sit3_eval_cases.jsonl", "r") as f:
         sit_eval_cases = [json.loads(line) for line in f]
 
-    collection_mapper = {
-        "voyage-law-2": ("voyage_embedded_clauses", 1024),
-        "text-embedding-3-small": ("text_embedded_clauses", 1536),
-        "Mira190/Euler-Legal-Embedding-V1": ("euler_embedded_clauses", 4096),
-        "Octen/Octen-Embedding-8B": ("octen_embedded_clauses", 4096),
-        "Qwen/Qwen3-Embedding-8B": ("qwen_embedded_clauses", 4096),
-    }
-
-    # set module-level COLLECTION_NAME
-    global COLLECTION_NAME, VECTOR_DIM
-    COLLECTION_NAME, VECTOR_DIM = collection_mapper.get(model_name, ("euler_embedded_clauses", 4096))
-    print(f"Using collection '{COLLECTION_NAME}' with vector dimension {VECTOR_DIM} for model '{model_name}'.")
-
     records = run_retrieval(sit_eval_cases, top_k=20, sleep_seconds=0, model_name=model_name)
     metrics = aggregate_metrics(records, recall_ks=(10, 20))
 
@@ -637,13 +684,13 @@ def main() -> None:
     Entry point: ensures the collection + indexes exist (without wiping
     existing data), then is ready for upsert_clauses / search_clauses calls.
     """
-    # setup_database(COLLECTION_NAME)
+    setup_database(COLLECTION_NAME)
 
-    # # Usage example (uncomment and provide real data/embeddings):
+    # Usage example (uncomment and provide real data/embeddings):
     
-    # with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/data/embedded_clauses/finra_clauses_embedded__Octen__Octen-Embedding-8B.jsonl", "r") as f:
-    #     new_clauses = [json.loads(line) for line in f]
-    # upsert_clauses(new_clauses)
+    with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/data/embedded_clauses/finra_clauses_embedded__voyage-law-2.jsonl", "r") as f:
+        new_clauses = [json.loads(line) for line in f]
+    upsert_clauses(new_clauses)
     
     # with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/data/evals/situation1/2000_sit1_eval_cases.jsonl", "r") as f:
     #     sit2000 = [json.loads(line) for line in f]
@@ -685,5 +732,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # main()
-    retrieval_eval(model_name="voyage-law-2")
+    main()
+    # retrieval_eval(model_name="voyage-law-2")

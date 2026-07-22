@@ -20,7 +20,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from agent.state import AgentState
 from agent.llm import get_chat_model
 from config import prompts 
-from agent.retrieval_tools import vector_search, filter_hits, get_parent, get_children
+from agent.retrieval_tools import clause_search, filter_hits, get_parent, get_children
 from config.settings import MAX_CLARIFICATION_TURNS
 from ingestion.build_vector_db import KEYWORD_FIELDS, BOOL_FIELDS
 
@@ -156,8 +156,8 @@ def retrieve_node(state: AgentState) -> dict:
     # (raw_query alone is unreliable once the conversation is past turn 1 --
     # it might just be "yes" or "$500").
     query_text = state.get("needs_more_search") or state.get("situation_summary") or state["raw_query"]
-    # filtered_hits = vector_search(query_text, filter_conditions=filter_conditions or None)
-    hits = vector_search(query_text, filter_conditions=None)
+    # filtered_hits = clause_search(query_text, filter_conditions=filter_conditions or None)
+    hits = clause_search(query_text, filter_conditions=None)
 
     # Filter the hits:
     filtered_hits = []
@@ -169,7 +169,7 @@ def retrieve_node(state: AgentState) -> dict:
     # reasoner discard irrelevant ones than to miss the right clause because
     # of an over-confident filter.
     # if len(filtered_hits) < 3 and filter_conditions:
-    #     hits = vector_search(query_text, filter_conditions=None)
+    #     hits = clause_search(query_text, filter_conditions=None)
     if len(filtered_hits) >= 4:
         hits = filtered_hits
 

@@ -99,7 +99,7 @@ ACTIVE_LLM = {
 # with it. Must match ingestion/build_vector_db.py's COLLECTION_NAME comment
 # block exactly.
 EMBEDDING_MODELS = {
-    "voyage-law-2":                     "voyage_embedded_clauses",
+    "voyage-law-2":                     "voyage_embedded_clauses_new",
     "Mira190/Euler-Legal-Embedding-V1":  "euler_embedded_clauses",
     "text-embedding-3-small":           "text_embedded_clauses",
     "Octen/Octen-Embedding-8B":         "octen_embedded_clauses",

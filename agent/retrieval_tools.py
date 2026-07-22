@@ -3,7 +3,7 @@ agent/retrieval_tools.py
 
 Everything that touches the vector database lives here, in two layers:
 
-1. Plain Python functions (vector_search, get_clause, get_children,
+1. Plain Python functions (clause_search, get_clause, get_children,
    lookup_cross_reference) -- used directly by the deterministic graph nodes
    in agent/nodes.py.
 
@@ -29,20 +29,40 @@ from ingestion.build_vector_db import search_clauses, get_clause_by_ref, get_chi
 # Layer 1: plain functions, used by the deterministic nodes
 # ---------------------------------------------------------------------------
 
-def vector_search(query_text: str, filter_conditions: dict | None = None, top_k: int | None = None) -> list[dict]:
+def clause_search(
+        query_text: str, 
+        filter_conditions: dict | None = None, 
+        top_k: int | None = None, 
+        search_mode: str = "dense",  # "dense" | "sparse"
+) -> list[dict]:
     """
     Embed query_text with the active embedding model and search the active
     collection, optionally narrowed by filter_conditions (same shape as
     ingestion.build_vector_db.search_clauses expects).
     """
-    embedding = generate_query_embeddings(query_text, ACTIVE_EMBEDDING_MODEL)
-    print("Generated embedding for the query text, now searching the vector database...")
-    return search_clauses(
-        query_embedding=embedding,
-        top_k=top_k or RETRIEVAL_TOP_K,
-        filter_conditions=filter_conditions,
-        collection_name=ACTIVE_COLLECTION_NAME,
-    )
+    if search_mode not in ("dense", "sparse"):
+        raise ValueError(f"search_mode must be 'dense' or 'sparse', got: {search_mode!r}")
+    
+    print(f"Opted for {search_mode} search mode...")
+    if search_mode == "dense":
+        embedding = generate_query_embeddings(query_text, ACTIVE_EMBEDDING_MODEL)
+        print("Generated embedding for the query text, now searching the closest clause...")
+        return search_clauses(
+            query_embedding=embedding,
+            search_mode = "dense",
+            top_k=top_k or RETRIEVAL_TOP_K,
+            filter_conditions=filter_conditions,
+            collection_name=ACTIVE_COLLECTION_NAME,
+        )
+    else:
+        print("Searching the BM25 Index...")
+        return search_clauses(
+            query_text=query_text,
+            search_mode = "sparse",
+            top_k=top_k or RETRIEVAL_TOP_K,
+            filter_conditions=filter_conditions,
+            collection_name=ACTIVE_COLLECTION_NAME,
+        )
 
 def filter_hits(
     hits: list[dict],
@@ -216,53 +236,6 @@ def get_parent(clause_ref: str, include_all_ancestors: bool = False) -> list[dic
     return chain
 
 
-# A loose pattern for FINRA-style clause references appearing inside clause
-# text, e.g. "Rule 4512", "2111.03", "3110(b)(2)". This is intentionally
-# permissive -- false positives just mean lookup_cross_reference() tries a
-# get_clause() that returns None and falls back to semantic search anyway.
-_CLAUSE_REF_PATTERN = re.compile(r"\b\d{4}(?:\.\d{1,3})?(?:\([a-zA-Z0-9]+\))*\b")
-
-
-def lookup_cross_reference(reference_text: str) -> list[dict]:
-    """
-    Given a snippet of clause text that appears to reference another clause
-    or rule (e.g. "...subject to the requirements of Rule 4512...", or just
-    "4512"), try to resolve it to an actual clause.
-
-    Strategy:
-      1. Pull out anything that looks like a clause number and try an exact
-         get_clause() lookup for each candidate -- cheap and precise when it
-         hits.
-      2. If none of those match a real clause_ref, fall back to a semantic
-         search using the reference_text itself, so the reasoner still gets
-         candidates to look at even when the reference is phrased loosely
-         ("the definition of 'institutional account' above") rather than as
-         a bare number.
-
-    Returns a list of clause payload dicts (exact hits first, semantic
-    fallback hits after, deduplicated by clause_ref).
-    """
-    exact_hits = []
-    seen_refs = set()
-
-    for candidate in _CLAUSE_REF_PATTERN.findall(reference_text):
-        if candidate in seen_refs:
-            continue
-        clause = get_clause(candidate)
-        if clause:
-            exact_hits.append(clause)
-            seen_refs.add(candidate)
-
-    if exact_hits:
-        return exact_hits
-
-    # No exact clause number found (or none of them exist) -- fall back to
-    # semantic search over the reference text so we still surface *something*
-    # for the reasoner to evaluate, rather than silently returning nothing.
-    semantic_hits = vector_search(reference_text, top_k=5)
-    return [hit["payload"] for hit in semantic_hits if hit["clause_ref"] not in seen_refs]
-
-
 # ---------------------------------------------------------------------------
 # Layer 2: the same functions, exposed as tools the reasoner agent can call
 # ---------------------------------------------------------------------------
@@ -270,6 +243,7 @@ def lookup_cross_reference(reference_text: str) -> list[dict]:
 @tool
 def search_clauses_tool(
     query: str,
+    search_mode: str = "dense",  # "dense" | "sparse"
     activity_type: list[str] | None = None,
     applies_to_firm_type: list[str] | None = None,
     documentation_required: bool | None = None,
@@ -280,12 +254,23 @@ def search_clauses_tool(
     obligated_actor: list[str] | None = None,
     regulated_subject: list[str] | None = None,
     reporting_recipient: list[str] | None = None,
-    rule_category: list[str] | None = None,
     rule_id: list[str] | None = None,
 ) -> list[dict]:
-    """Semantic search over the FINRA clause database. Use this to find
-    clauses related to a topic. Optionally narrow results with any of the
-    metadata filters below if you already know them."""
+    """Search the FINRA clause database for clauses related to a topic.
+
+    Two search modes are available:
+    - "dense": semantic/embedding-based search. Best for conceptual or
+      paraphrased queries where the exact wording may not match the clause
+      text (default).
+    - "sparse": BM25 keyword-based search. Best when you need to match
+      specific terms, phrases, or exact language likely to appear
+      verbatim in the clause text (e.g. defined terms, rule citations).
+
+    Optionally narrow results with any of the metadata filters below.
+    Only set a filter if you are confident it applies — do not guess.
+    Leaving a filter as None means it is not applied; setting it
+    incorrectly can wrongly exclude relevant clauses.
+    """
     kwargs = {
         "activity_type": activity_type,
         "applies_to_firm_type": applies_to_firm_type,
@@ -297,11 +282,10 @@ def search_clauses_tool(
         "obligated_actor": obligated_actor,
         "regulated_subject": regulated_subject,
         "reporting_recipient": reporting_recipient,
-        "rule_category": rule_category,
         "rule_id": rule_id,
     }
     filters = {k: v for k, v in kwargs.items() if v is not None and v != []}
-    return vector_search(query, filter_conditions=filters or None)
+    return clause_search(query, filter_conditions=filters or None, search_mode=search_mode)
 
 
 @tool
@@ -324,20 +308,10 @@ def get_parent_tool(clause_ref: str) -> list[dict]:
     Use this to see the broader obligation a specific clause sits under."""
     return get_parent(clause_ref)
 
-
-@tool
-def lookup_cross_reference_tool(reference_text: str) -> list[dict]:
-    """Resolve a lateral reference found INSIDE a clause's text (e.g. a
-    clause that says 'see Rule 4512' or 'as defined above') to the actual
-    clause(s) it points to. Pass the exact snippet of text containing the
-    reference."""
-    return lookup_cross_reference(reference_text)
-
-
+# If any tool (including the tool name) is updated/added here, update the prompt: REASONER_TOOL_INSTRUCTIONS
 REASONER_TOOLS = [
     search_clauses_tool,
     get_clause_tool,
     get_children_tool,
     get_parent_tool,
-    # lookup_cross_reference_tool,
 ]

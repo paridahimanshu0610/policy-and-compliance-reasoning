@@ -92,7 +92,7 @@ def reason_node(state: AgentState) -> dict:
     """Hand the working clause_graph to the deep agent, let it investigate
     (chase cross-references, pull more context, etc.) and return its
     structured verdict. Merge that verdict back into clause_graph."""
-    agent = _get_reasoner_agent()
+    agent = _get_reasoner_agent(use_tools=True)
 
     clause_summaries = [
         {"clause_ref": c["clause_ref"], "text": c["payload"].get("merged_clause") or c["payload"].get("original_clause"),
