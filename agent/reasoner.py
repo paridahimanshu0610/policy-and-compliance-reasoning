@@ -17,9 +17,10 @@ import json
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 from deepagents import create_deep_agent
+from langchain.agents import create_agent
 
 from agent.state import AgentState
 from agent.llm import get_chat_model
@@ -78,7 +79,7 @@ def _get_reasoner_agent(use_tools: bool = False):
         if use_tools:
             system_prompt += prompts.REASONER_TOOL_INSTRUCTIONS
 
-        _reasoner_agent = create_deep_agent(
+        _reasoner_agent = create_agent(
             model=get_chat_model("reasoner"),
             tools=REASONER_TOOLS if use_tools else None,
             system_prompt=system_prompt,
@@ -87,6 +88,31 @@ def _get_reasoner_agent(use_tools: bool = False):
         )
     return _reasoner_agent
 
+def _extract_tool_clause_payloads(messages) -> dict[str, dict]:
+    """Map clause_ref -> payload for any clauses the reasoner fetched via tool calls."""
+    call_id_to_ref: dict[str, str] = {}
+    for msg in messages:
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                args = tc.get("args", {}) or {}
+                # adjust key name(s) to match whatever REASONER_TOOLS actually accept
+                ref = args.get("clause_ref") or args.get("ref")
+                if ref:
+                    call_id_to_ref[tc["id"]] = ref
+
+    payloads: dict[str, dict] = {}
+    for msg in messages:
+        if isinstance(msg, ToolMessage):
+            ref = call_id_to_ref.get(msg.tool_call_id)
+            if not ref:
+                continue
+            content = msg.content
+            try:
+                parsed = json.loads(content) if isinstance(content, str) else content
+            except (json.JSONDecodeError, TypeError):
+                parsed = {"raw": content}
+            payloads[ref] = parsed
+    return payloads
 
 def reason_node(state: AgentState) -> dict:
     """Hand the working clause_graph to the deep agent, let it investigate
@@ -110,7 +136,7 @@ def reason_node(state: AgentState) -> dict:
 
     result = agent.invoke({"messages": [{"role": "user", "content": task}]})
     output: ReasonerOutput = result["structured_response"] # result["messages"][-1] 
-
+    # tool_payloads = _extract_tool_clause_payloads(result["messages"])
     initial_graph = {c["clause_ref"]: c for c in state.get("clause_graph", [])}
     new_graph = {}
     for reasoned in output.clauses:
@@ -123,7 +149,7 @@ def reason_node(state: AgentState) -> dict:
             # reference) that wasn't in our pre-expanded set -- keep it.
             new_graph[reasoned.clause_ref] = {
                 "clause_ref": reasoned.clause_ref,
-                "payload": {},  # not fetched here; synthesis only needs clause_ref + reasoning
+                "payload": {}, # tool_payloads.get(reasoned.clause_ref, {}),  # not fetched here; synthesis only needs clause_ref + reasoning
                 "relevance_role": reasoned.relevance_role,
                 "reasoning": reasoned.reasoning,
                 "provenance": "reasoner_tool_call",
@@ -171,7 +197,7 @@ def synthesize_node(state: AgentState) -> dict:
         "situation": state.get("situation_summary") or state["raw_query"],
         # "known_facts": state.get("known_fields", {}),
         "reasoned_clauses": [
-            {"clause_ref": c["clause_ref"], "role": c["relevance_role"], "clause_actual_text": c["payload"]["merged_clause"], "reasoning": c["reasoning"]}
+            {"clause_ref": c["clause_ref"], "role": c["relevance_role"], "reasoning": c["reasoning"]} # "clause_actual_text": c["payload"]["merged_clause"],
             for c in relevant
         ],
         "conflicts": state.get("conflicts", []),

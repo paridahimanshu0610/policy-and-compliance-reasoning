@@ -1860,49 +1860,53 @@ uncertain_fields (list of field names, always returned -- can be empty)
 // {obligated_actor, regulated_subject, activity_type, applies_to_firm_type,
 // involves_customer, involves_third_party, has_financial_threshold,
 // documentation_required, frequency, reporting_recipient, numeric_value}
-// the user has been asked about and clearly cannot answer -- e.g. the AI's
-// last message asked something like "do you know roughly how much the gift
-// was worth?" and the user responded "no idea" / "I don't know" / "not
-// sure" / "I'd have to check."
+// the user does not know or cannot determine, based on the FULL situation
+// as currently understood (running situation summary + latest exchange) --
+// regardless of whether the AI ever explicitly asked about that field.
+//
+// This covers BOTH:
+//   - asked-then-declined: the AI's last message asked something like "do
+//     you know roughly how much the gift was worth?" and the user
+//     responded "no idea" / "I don't know" / "not sure" / "I'd have to
+//     check"; and
+//   - volunteered-unprompted: the user states, without being asked, that
+//     they don't know or can't determine some fact relevant to one of
+//     these fields -- including on the very first message of a
+//     conversation, before the AI has asked anything.
+// Treat both the same way: if the situation as currently understood
+// indicates the user doesn't know a field's value, that field goes in this
+// list. There is no separate "was this asked about" gate -- apply the same
+// judgment you'd use for any other field's extraction, just detecting
+// "stated unknown" instead of "stated known."
 //
 // HOW TO DECIDE:
-// 1. Start from the "Field(s) the AI's last question targeted" section
-//    provided in this prompt -- this names the field(s), if any, the most
-//    recent AI question was actually asking about. It will be empty on the
-//    first turn of a conversation, before any clarifying question has been
-//    asked. When it is non-empty, check the "Latest interaction between
-//    system and user": for each field named there, did the user's reply
-//    clearly decline or fail to answer it -- not merely a vague or partial
-//    answer? Each field's "detail" text describes what that field is
-//    asking about in plain language; use it to confirm the AI's question
-//    matches that field. If the user gives ANY real information relevant
-//    to the field (even if it only narrows things to two possibilities),
-//    that field is NOT uncertain -- extract it normally instead (using
-//    multiple values per the ambiguity rule if genuinely warranted).
-// 2. Re-derive this list fresh from the full situation summary and latest
-//    exchange each time -- do not just append to a prior list. If the
-//    situation summary indicates a field was previously flagged as unknown
-//    (e.g. "they weren't sure how much the gift was worth"), and nothing in
-//    the latest exchange has since answered it, keep it in this list. If
-//    the latest exchange DOES answer it, drop it from this list and extract
-//    the real value into that field instead.
-// 3. Do not use this list for fields the user simply hasn't been asked
-//    about yet -- it is only for fields that were asked (per "Field(s) the
-//    AI's last question targeted" or per a prior unresolved flag in the
-//    situation summary) and explicitly could not be answered. A field
-//    that's merely still unmentioned should just stay null in its own
-//    field, not appear here.
-// 4. A field can only enter uncertain_fields if it is grounded in one of
-//    two sources: (a) it appears in "Field(s) the AI's last question
-//    targeted" for this turn and the user's reply in the latest
-//    interaction fails to answer it, or (b) the situation summary
-//    narrative indicates it was previously flagged as unknown and nothing
-//    in the latest exchange has since resolved it. Do not invent an
-//    uncertain field grounded in neither source.
+// 1. For each of the 11 fields that is still null/empty, check whether the
+//    situation summary or latest exchange contains a statement of not
+//    knowing / being unable to determine that field's value. Map vague
+//    "I don't know that stuff" statements to the closest matching field(s)
+//    only where there's real textual support -- do not invent an uncertain
+//    field with no textual basis, the same way you would not invent a
+//    known value with no textual basis.
+// 2. If the user gives ANY real information relevant to a field (even if it
+//    only narrows things to two possibilities), that field is NOT
+//    uncertain -- extract it normally instead (using multiple values per
+//    the ambiguity rule if genuinely warranted).
+// 3. Re-derive this list fresh from the full situation summary and latest
+//    exchange each time -- do not just append to a prior list. If a field
+//    was previously flagged as unknown and nothing in the latest exchange
+//    has since answered it, keep it in this list. If the latest exchange
+//    DOES answer it, drop it from this list and extract the real value
+//    into that field instead.
+// 4. Do not use this list for fields the user simply hasn't addressed at
+//    all yet -- it is only for fields where not-knowing has actually been
+//    stated (by the user, at any point, asked or not). A field that's
+//    merely still unmentioned should just stay null in its own field, not
+//    appear here.
 //
 // This list lets the system avoid re-asking questions the user has already
-// said they can't answer -- so it should always reflect an accurate
-// current picture, not the very first time a field was ever flagged.
+// indicated they can't answer -- so it should always reflect an accurate
+// current picture, not just the first time a field was ever flagged, and
+// not just fields the AI happened to ask about.
 
 situation_summary (string, required) -- updated 2-4 sentence plain-language
 description of the person's FULL situation as currently understood -- a
@@ -1940,28 +1944,33 @@ regulated_subject BY DESIGN, because that's what makes them a rule and an \
 exception rather than two copies of the same rule. That is normal and is \
 not ambiguity.
 
-2. GAPS -- Is there a specific fact about the user's situation, not yet in \
-"facts already known", that would change WHICH of these candidate clauses \
-actually apply (or whether a specific numeric threshold puts them on one \
-side of a line or another)? List each such fact as a gap. A gap must be \
-load-bearing: if you already know the answer would be complete and correct \
-without asking it, do NOT list it.
+2. GAPS -- Consider these fields: obligated_actor, regulated_subject,
+activity_type, applies_to_firm_type, involves_customer, involves_third_party,
+has_financial_threshold, documentation_required, frequency,
+reporting_recipient, numeric_value.
 
-   Common real gaps: the situation depends on a specific dollar amount / \
-percentage / count that hasn't been given (has_financial_threshold=true on \
-a candidate and no value provided yet); the entity type asking (retail vs. \
-institutional customer, carrying vs. introducing firm, broker-dealer vs. \
-registered rep) changes obligated_actor or applies_to_firm_type; whether a \
-customer or third party is involved changes which clause governs.
+   For any such field that is missing from "facts already known", ask: would
+   knowing its value change WHICH of these candidate clauses actually apply
+   (or, for numeric_value, would knowing the actual number put the situation
+   on one side of a threshold or another)? If yes, list it as a gap, phrased
+   as a natural-language question about that field. A gap must be
+   load-bearing: if you already know the answer would be complete and
+   correct without asking it, do NOT list it.
 
-   Do NOT list a gap just because two candidates have different field \
-values -- only when the missing fact would change which clause(s) belong \
-in the final answer for THIS situation.
+   Common real gaps: has_financial_threshold=true on a candidate and no
+   numeric_value provided yet; the entity type asking (retail vs.
+   institutional customer, carrying vs. introducing firm, broker-dealer vs.
+   registered rep) changes obligated_actor or applies_to_firm_type; whether a
+   customer or third party is involved changes which clause governs.
 
-    If a fact is listed as one the user has already said they don't know, \
-never list it as a gap, even if a candidate clause depends on it -- treat \
-it as permanently unresolved for this conversation, not something to ask \
-about again.
+   Do NOT list a gap just because two candidates have different field
+   values -- only when the missing field value would change which clause(s)
+   belong in the final answer for THIS situation.
+
+   If a field is listed in "Fields the user has already said they don't
+   know", never generate a gap for it, even if a candidate clause depends on
+   it -- treat it as permanently unresolved for this conversation, not
+   something to ask about again.
 """
 
 CLARIFY_SYSTEM_PROMPT = """You are a compliance assistant. You will be \
@@ -2094,16 +2103,6 @@ REASONER_TOOL_INSTRUCTIONS = """
 You are not limited to the candidate clauses you were handed — you have \
 tools to investigate further when the candidate set is incomplete:
 
-- `search_clauses_tool`: search for clauses on a topic/situation/condition \
-you suspect exists but wasn't retrieved. Supports "dense" (semantic) and "sparse" \
-(BM25 keyword) search modes — choose based on whether the query is conceptual \
-or relies on exact terms. For "dense" mode, phrase the query as a concise, \
-natural description of the situation or requirement, not just a list of keywords. \
-For "sparse" mode, phrase the query using the specific terms, phrases, or defined \
-language you expect to appear verbatim in the clause text (e.g. "designated account" \
-or a section number), and avoid rephrasing or paraphrasing them. Only set metadata \
-filters when you are confident they apply; if unsure, leave the filter unset rather than guessing. 
-
 - `get_clause_tool`: fetch one clause or a list of clauses by their exact \
 clause_ref. Also use it to resolve a lateral reference found INSIDE a \
 clause's text to the actual clause(s) it points to.
@@ -2121,6 +2120,24 @@ through (I) and (c)(2) of this Rule" → clause_ref should be a list: \
   Do not resolve generic references to non-FINRA rules or sections (e.g. \
 "as defined in Section 220.2 of Regulation T", "for purposes of SEA Rule \
 15c3-3") — these are out of scope for this tool.
+
+  **Precedence over search_clauses_tool:** whenever a clause names an exact \
+rule number, paragraph, or section — anywhere you can build a clause_ref \
+from the text as shown above — always use `get_clause_tool`, never \
+`search_clauses_tool`, even if the reference could be phrased as a search \
+query. Reserve `search_clauses_tool` for when no exact reference exists to \
+resolve — you only have a topic, concept, or condition you suspect is \
+covered somewhere, with no specific rule/paragraph number to point to.
+
+- `search_clauses_tool`: search for clauses on a topic/situation/condition \
+you suspect exists but wasn't retrieved. Supports "dense" (semantic) and "sparse" \
+(BM25 keyword) search modes — choose based on whether the query is conceptual \
+or relies on exact terms. For "dense" mode, phrase the query as a concise, \
+natural description of the situation or requirement, not just a list of keywords. \
+For "sparse" mode, phrase the query using the specific terms, abbreviations, phrases, or defined \
+language you expect to appear verbatim in the clause text (e.g. "designated account" \
+or "office of supervisory jurisdiction (OSJ)"), and avoid rephrasing or paraphrasing them. Only set metadata \
+filters when you are confident they apply; if unsure, leave the filter unset rather than guessing. 
 
 - `get_children_tool`: fetch sub-clauses of a clause_ref. Use this when \
 the current clause references or implies further sub-provisions \

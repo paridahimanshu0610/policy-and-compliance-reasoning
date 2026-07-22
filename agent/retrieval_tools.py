@@ -254,7 +254,7 @@ def search_clauses_tool(
     obligated_actor: list[str] | None = None,
     regulated_subject: list[str] | None = None,
     reporting_recipient: list[str] | None = None,
-    rule_id: list[str] | None = None,
+    rule_id: str | None = None,
 ) -> list[dict]:
     """Search the FINRA clause database for clauses related to a topic.
 

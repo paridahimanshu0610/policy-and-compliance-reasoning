@@ -16,6 +16,51 @@ from langchain_openai import ChatOpenAI
 
 from config.settings import LLM_MODELS, ACTIVE_LLM
 
+import json
+import httpx
+class NullContentFixTransport(httpx.HTTPTransport):
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        request = _patch_request(request)
+        return super().handle_request(request)
+
+
+class AsyncNullContentFixTransport(httpx.AsyncHTTPTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        request = _patch_request(request)
+        return await super().handle_async_request(request)
+
+
+def _patch_request(request: httpx.Request) -> httpx.Request:
+    request.read()  # ensure content is buffered and accessible
+    if not request.content:
+        return request
+    try:
+        body = json.loads(request.content)
+    except (json.JSONDecodeError, TypeError):
+        return request
+
+    changed = False
+    for m in body.get("messages", []):
+        if m.get("content") is None:
+            m["content"] = ""
+            changed = True
+
+    if not changed:
+        return request
+
+    new_content = json.dumps(body).encode("utf-8")
+    headers = httpx.Headers(request.headers)
+    headers["content-length"] = str(len(new_content))
+    return httpx.Request(
+        method=request.method,
+        url=request.url,
+        headers=headers,
+        content=new_content,
+    )
+
+
+http_client = httpx.Client(transport=NullContentFixTransport())
+http_async_client = httpx.AsyncClient(transport=AsyncNullContentFixTransport())
 
 def get_chat_model(role: str, temperature: float = 0.0) -> ChatOpenAI:
     """
@@ -44,6 +89,8 @@ def get_chat_model(role: str, temperature: float = 0.0) -> ChatOpenAI:
         "model": cfg["model"],
         "base_url": cfg["base_url"],
         "api_key": cfg["api_key"],
+        "http_client": httpx.Client(transport=NullContentFixTransport()),
+        "http_async_client": httpx.AsyncClient(transport=AsyncNullContentFixTransport())
     }
     # Some models behind the gateway (reasoning-style ones especially) throw
     # a 400 if you send temperature at all -- only include it for models
