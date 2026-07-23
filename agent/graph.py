@@ -6,22 +6,6 @@ LangGraph StateGraph, and exposes run_turn() -- the single function you call
 from anywhere (a REPL loop today, a FastAPI route later) to advance the
 conversation by one user message.
 
-Control flow:
-
-    intake -> ambiguity_check --(ambiguous)--> clarify --> END
-                    |
-              (not ambiguous)
-                    v
-                retrieve -> gap_analysis --(blocking gap)--> clarify --> END
-                                  |
-                            (no blocking gap)
-                                  v
-                              expand -> reason --(needs more)--> retrieve
-                                            |
-                                      (sufficient)
-                                            v
-                                       synthesize -> END
-
 Each call to run_turn() is one full graph.invoke(). Conversation memory
 (known_fields, clause_graph, gaps, etc.) persists BETWEEN calls because we
 use a checkpointer keyed by thread_id -- so when the user answers a
