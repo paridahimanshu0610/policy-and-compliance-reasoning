@@ -102,7 +102,7 @@ def send_handoff_email(situation_summary: str, name: str, email: str, note: str 
                 server.starttls()
             if SMTP_USERNAME and SMTP_PASSWORD:
                 server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            res = server.send_message(msg)
+            server.send_message(msg)
         return True
     except Exception:
         logger.exception("Failed to send compliance handoff email.")
@@ -126,14 +126,23 @@ def human_handoff_node(state: AgentState) -> dict:
 
     if not consent:
         decline_message = (
-            "No problem. Thank you for taking your time and sharing your "
-            " issue with us. Have a great day!"
+            "No problem -- I'll keep helping here. Let me know if you'd like to "
+            "add more detail, or if you change your mind about reaching an agent."
         )
-        return {
+        updates: dict = {
             "final_answer": decline_message,
             "messages": [AIMessage(content=decline_message)],
             "escalation_reason": None,
         }
+        # Give the agent a fresh budget rather than re-offering the handoff on
+        # every subsequent turn -- only reset whichever counter actually
+        # caused this escalation (a "user_requested" handoff wasn't
+        # cap-triggered, so neither counter should be touched).
+        if reason == "clarification_cap":
+            updates["clarification_count"] = 0
+        elif reason == "reason_cap":
+            updates["reasoning_cycles"] = 0
+        return updates
 
     name = interrupt({"stage": "name", "question": "Great -- could you share your name?"})
     email = interrupt({
@@ -182,6 +191,3 @@ def human_handoff_node(state: AgentState) -> dict:
         "handoff_note": note,
         "handoff_sent": sent_ok,
     }
-
-if __name__=="__main__":
-    send_handoff_email("Hello, how are you", "Adam", "pp29@iitbbs.ac.in", "You're such a great person")
