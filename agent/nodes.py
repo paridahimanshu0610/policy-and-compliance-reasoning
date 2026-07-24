@@ -19,10 +19,29 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from agent.state import AgentState
 from agent.llm import get_chat_model
+from agent.pii import mask_pii
 from config import prompts 
 from agent.retrieval_tools import clause_search, filter_hits, get_parent, get_children
-from config.settings import MAX_CLARIFICATION_TURNS
+from config.settings import MAX_CLARIFICATION_TURNS, MAX_REASONING_CYCLES
 from ingestion.build_vector_db import KEYWORD_FIELDS, BOOL_FIELDS
+
+
+# ---------------------------------------------------------------------------
+# 0. Mask input -- PII guardrail, runs before anything else touches raw_query
+# ---------------------------------------------------------------------------
+
+def mask_input_node(state: AgentState) -> dict:
+    """First node in the graph, every turn. Masks PII (email, phone, SSN,
+    card/account numbers) out of the raw user message before it's used for
+    scope-checking, intake, retrieval, or any LLM prompt -- everything
+    downstream operates on masked text. The mapping needed to reverse this
+    is threaded through state["pii_map"] and persists for the whole
+    conversation via the checkpointer, so the same value gets the same
+    token across turns. Unmasking happens in exactly two places: run_turn()
+    right before showing content to the user, and human_handoff_node right
+    before the situation summary is emailed to a real compliance agent."""
+    masked_query, updated_map = mask_pii(state.get("raw_query"), state.get("pii_map", {}))
+    return {"raw_query": masked_query, "pii_map": updated_map}
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +240,7 @@ def _format_candidate(c: dict) -> str:
     return f"[{c['clause_ref']}] ({tags})\n{text}"
 
 
-def clarification_check_node(state: AgentState) -> dict:
+def ambiguity_and_gap_check_node(state: AgentState) -> dict:
     """One LLM call, reading the actual candidate clause text, that decides
     two things at once:
       1. Is the user's question itself ambiguous (Situation 11)?
@@ -277,9 +296,60 @@ def clarification_check_node(state: AgentState) -> dict:
         "is_ambiguous": result.is_ambiguous,
         "ambiguity_question": result.ambiguity_question,
         "gaps": gaps,
-        "uncertain_fields": uncertain_fields,  # carried forward, cleaned of anything now resolved
+        "uncertain_fields": uncertain_fields,  # carried forward, cleaned of anything now resolved 
     }
 
+# ---------------------------------------------------------------------------
+# 4. Clarification-and-reasoning-cap marker -- sets escalation_reason before human handoff
+# ---------------------------------------------------------------------------
+def _has_ambiguity_or_gap(state: AgentState) -> bool:
+    # "clarification_count" is the number of questions asked via the "clarify" node so far. 
+    blocking = [g for g in state.get("gaps", []) if g["determines_clause_applicability"]]
+    ambiguity_or_gap_exists = bool(state.get("is_ambiguous")) or bool(blocking)
+
+    return ambiguity_or_gap_exists     
+
+def _needs_clarify(state: AgentState) -> bool:
+    ambiguity_or_gap_exists = _has_ambiguity_or_gap(state)
+    count = state.get("clarification_count", 0)
+
+    return ambiguity_or_gap_exists and count < MAX_CLARIFICATION_TURNS 
+
+def _reached_clarification_cap(state: AgentState) -> bool:
+    # If there is some ambiguity/gap (i.e. clarification via clarify node is needed) but MAX_CLARIFICATION_TURNS is reached
+    count = state.get("clarification_count", 0)
+    return _has_ambiguity_or_gap(state) and count >= MAX_CLARIFICATION_TURNS   
+
+def _needs_expand(state: AgentState) -> bool:
+    # Checks if further clarification is needed and is possible too (i.e. MAX_CLARIFICATION_TURNS not reached)
+    clarification_needed = _needs_clarify(state)
+
+    # If there is some ambiguity/gap (i.e. clarification via clarify node is needed) but MAX_CLARIFICATION_TURNS is reached
+    clarification_cap_reached = _reached_clarification_cap(state)
+
+    # In case, clarificaction is required or clarification cap is reached, expand should not be executed.
+    must_expand = not (clarification_needed or clarification_cap_reached)
+
+    return must_expand 
+
+def _reached_reasoning_cap(state: AgentState) -> bool:
+    expansion_needed = _needs_expand(state)
+    reasoning_cycles = state.get("reasoning_cycles", 0) 
+    return expansion_needed and (reasoning_cycles >= MAX_REASONING_CYCLES) 
+
+def clarification_and_reason_cap_check_node(state: AgentState) -> dict:
+    clarification_cap_reached = _reached_clarification_cap(state)
+    reasoning_cap_reached = _reached_reasoning_cap(state)
+
+    escalation_reason = (
+        "clarification_cap"
+        if clarification_cap_reached
+        else "reason_cap"
+        if reasoning_cap_reached
+        else None
+    )
+
+    return {"escalation_reason":escalation_reason}
 
 # ---------------------------------------------------------------------------
 # 5. Clarify -- ask the single highest-priority open question

@@ -77,18 +77,22 @@ LLM_MODELS = {
 # that calls get_chat_model(role) in agent/llm.py. Change the value on the
 # right to swap models for that role without touching any node code.
 #
-#   intake    -- turns the user's plain-language message into normalized
-#                fields (does not need the strongest model; cheap + frequent)
-#   ambiguity -- decides if the query is genuinely ambiguous
-#   clarify   -- phrases the one clarifying question to ask
-#   reasoner  -- the deep agent: assigns clause roles, checks conflicts,
-#                decides scope, writes the final answer (wants the strongest
-#                reasoning model since mistakes here are the costly ones)
+#   intake       -- turns the user's plain-language message into normalized
+#                   fields (does not need the strongest model; cheap + frequent)
+#   ambiguity    -- decides if the query is genuinely ambiguous
+#   clarify      -- phrases the one clarifying question to ask
+#   reasoner     -- the deep agent: assigns clause roles, checks conflicts,
+#                   decides scope, writes the final answer (wants the strongest
+#                   reasoning model since mistakes here are the costly ones)
+#   scope_guard  -- runs on every turn before anything else: decides whether
+#                   the message is in-scope for FINRA compliance help at all,
+#                   and whether the user is explicitly asking for a human agent
 ACTIVE_LLM = {
-    "intake":    "o3",
-    "ambiguity": "o3",
-    "clarify":   "o3",
-    "reasoner":  "o3",
+    "intake":      "o3",
+    "ambiguity":   "o3",
+    "clarify":     "o3",
+    "reasoner":    "o3",
+    "scope_guard": "o3",
 }
 
 # ---------------------------------------------------------------------------
@@ -117,11 +121,31 @@ RETRIEVAL_TOP_K = 10
  
 # Safety cap: max clarifying questions asked before the agent gives its best
 # answer anyway (with caveats), so a confused user never gets stuck in a loop.
-MAX_CLARIFICATION_TURNS = 4
+MAX_CLARIFICATION_TURNS = 1
  
 # Safety cap: max retrieve -> reason cycles within a single turn, in case the
 # reasoner keeps asking for "just one more search".
-MAX_REASONING_CYCLES = 4
+MAX_REASONING_CYCLES = 1
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop escalation / compliance-agent handoff
+# ---------------------------------------------------------------------------
+
+# Where the summarized situation + the user's contact details get emailed
+# when a human handoff is triggered (either the user asked directly, or one
+# of the safety caps above was exceeded). Override via .env in production.
+EMAIL_ID = os.getenv("COMPLIANCE_TEAM_EMAIL")
+
+# SMTP settings for actually sending that email. All read from the
+# environment -- nothing here should be a real credential in source control.
+SMTP_HOST = os.getenv("SMTP_HOST")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").strip().lower() in ("1", "true", "yes")
+# Falls back to SMTP_USERNAME since most providers require the From address
+# to match the authenticated account.
+SMTP_FROM_ADDRESS = os.getenv("SMTP_FROM_ADDRESS", SMTP_USERNAME)
 
 
 SERIES_MAP = {

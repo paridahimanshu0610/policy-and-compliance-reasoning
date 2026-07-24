@@ -22,9 +22,10 @@ class AgentState(TypedDict, total=False):
     # so LangGraph appends new messages instead of overwriting the list.
 
     raw_query: str
-    # The exact text the user just typed THIS TURN ONLY. After a clarifying
-    # question, this might just be "yes" or "$500" -- it is NOT a restatement
-    # of the whole situation, so don't use it alone for retrieval.
+    # The exact text the user just typed THIS TURN ONLY, AFTER PII masking
+    # (see pii_map below). After a clarifying question, this might just be
+    # "yes" or "$500" -- it is NOT a restatement of the whole situation, so
+    # don't use it alone for retrieval.
 
     situation_summary: str
     # A running plain-language description of the FULL situation as
@@ -32,7 +33,8 @@ class AgentState(TypedDict, total=False):
     # intake_node. This is what retrieval should search on -- it stays
     # coherent even when the latest message is a one-word answer to a
     # clarifying question, because it already has the earlier context baked
-    # in.
+    # in. Contains masked PII tokens, same as raw_query -- only unmasked
+    # right before something is shown to the user or emailed out.
 
     # --- accumulated understanding of the situation ---
     known_fields: dict[str, Any]
@@ -45,6 +47,26 @@ class AgentState(TypedDict, total=False):
     # stay in sync automatically.
 
     uncertain_fields: list[str]
+
+    # --- input guardrails ---
+    pii_map: dict[str, str]
+    # Reversible mapping of mask token -> original PII value, e.g.
+    # {"[[EMAIL_1]]": "jane@example.com"}. Populated by mask_input_node on
+    # every turn (accumulates across the whole conversation, keyed by
+    # thread_id via the checkpointer) and consulted by run_turn() to unmask
+    # any token that ends up in something we show back to the user, and by
+    # the human handoff node to unmask the situation_summary before it's
+    # emailed to a real person.
+
+    # --- scope gating ---
+    in_scope: bool
+    # False if the user's latest message isn't a FINRA-compliance question
+    # at all (weather, booking a flight, etc.) -- routes straight to a
+    # polite redirect instead of entering the main reasoning flow.
+
+    wants_human_agent: bool
+    # True if the user directly asked to be connected with a human/agent/
+    # representative, independent of scope or any cap being hit.
 
     # --- ambiguity handling ---
     is_ambiguous: bool
@@ -74,7 +96,8 @@ class AgentState(TypedDict, total=False):
 
     clarification_count: int
     # How many clarifying questions we've asked this conversation. Capped by
-    # config.settings.MAX_CLARIFICATION_TURNS so the agent never loops forever.
+    # config.settings.MAX_CLARIFICATION_TURNS -- once exceeded, we offer a
+    # human handoff instead of asking yet another question.
 
     # --- reasoning outcome ---
     conflicts: list[dict]
@@ -87,11 +110,31 @@ class AgentState(TypedDict, total=False):
 
     reasoning_cycles: int
     # How many retrieve -> reason loops have run this turn. Capped by
-    # config.settings.MAX_REASONING_CYCLES.
+    # config.settings.MAX_REASONING_CYCLES -- once exceeded, synthesize still
+    # runs (best-effort answer with caveats), but we additionally offer a
+    # human handoff afterward.
 
     out_of_scope: bool
     scope_note: str | None
     # Situation 9: nothing in Rules 2000/3000/4000 actually covers this.
+    # (Distinct from in_scope/False above: that's a pre-filter for
+    # completely unrelated requests like "what's the weather"; this is the
+    # reasoner deciding, after actually investigating, that no FINRA clause
+    # applies to an otherwise on-topic compliance situation.)
+
+    # --- human-in-the-loop / compliance-agent handoff ---
+    escalation_reason: str | None
+    # Why we're routing to human_handoff_node this turn: "user_requested",
+    # "clarification_cap", or "reason_cap". None means we're not
+    # escalating.
+
+    handoff_name: str | None
+    handoff_email: str | None
+    handoff_note: str | None
+    handoff_sent: bool
+    # Filled in by human_handoff_node once the user has gone through the
+    # consent -> name -> email -> note sequence and the summary email has
+    # (or hasn't) been sent successfully.
 
     # --- output ---
     final_answer: str | None
