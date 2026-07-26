@@ -1558,6 +1558,13 @@ CRITICAL RULES
    satisfies both associated_person and registered_representative criteria
    equally. Do NOT return multiple values just because they're topically
    related; each returned value must independently satisfy its criterion.
+   This rule applies to EVERY field below, including obligated_actor,
+   regulated_subject, activity_type, applies_to_firm_type, frequency, and
+   numeric_value -- each of these may output more than one value, but only
+   when the situation genuinely and independently satisfies more than one
+   value's own criterion; do not pick extra values for "coverage" or
+   because they seem related or plausible. When only one value's criterion
+   is actually met, output only that one value.
 5. When a value's criterion is met, use it even if a "bigger" or more
    general value also technically applies (e.g. if the criteria for
    "registered_representative" is met, don't also add "associated_person"
@@ -1576,9 +1583,13 @@ FIELD-BY-FIELD CRITERIA
 ========================
 
 obligated_actor -- which role the person (or the person central to the
-situation) occupies. Use the FIRST matching criterion below; these are
-ordered most-specific first, so check specific ones before defaulting to
-general ones.
+situation) occupies. Normally output a single value: use the FIRST
+matching criterion below, since these are ordered most-specific first, so
+check specific ones before defaulting to general ones. Output more than
+one value only if rule 4's ambiguity standard is met (two values' criteria
+are independently satisfied with no way to disambiguate) -- do not add a
+second value merely because a more general category also technically fits
+a value you already selected (see rule 5).
 // "CEO"                → person says they are the CEO / top executive /
 //                        "I run the firm"
 // "CCO"                → person says they are the Chief Compliance
@@ -1622,7 +1633,12 @@ general ones.
 // null                  → no role, job, or registration status is
 //                        indicated anywhere in the situation
 
-regulated_subject -- the central thing the situation is about.
+regulated_subject -- the central thing the situation is about. Normally
+output a single value -- the one whose criterion is most directly met.
+Output more than one value only when rule 4's ambiguity standard is
+genuinely met for two or more values; do not add extra values just because
+several subjects are mentioned in passing or are topically related to the
+main one.
 // "associated_person_account" → person mentions having a personal
 //                        brokerage/investment account somewhere OTHER
 //                        than the firm they work for
@@ -1699,6 +1715,11 @@ regulated_subject -- the central thing the situation is about.
 
 activity_type -- what the person is doing, being asked to do, or asking
 whether they're allowed to do. THIS FIELD SHOULD RARELY BE LEFT NULL.
+Normally output a single value -- the closest reasonable match. Output
+more than one value only when rule 4's ambiguity standard is genuinely
+met; a runner-up activity should be left out unless it independently and
+fully satisfies its own criterion, not merely because it's adjacent to the
+chosen one.
 // "conduct_standard"    → general question about honesty/fairness/fraud
 //                        in dealing with someone, no more specific fit
 // "pay_to_play"         → mentions political contributions in connection
@@ -1784,7 +1805,12 @@ whether they're allowed to do. THIS FIELD SHOULD RARELY BE LEFT NULL.
 
 applies_to_firm_type -- which role the person's OWN firm occupies, if
 stated. Include "broker_dealer" alongside a specific value whenever a
-specific one applies (matches clause-tagging convention).
+specific one applies (matches clause-tagging convention) -- this
+broker_dealer pairing is a standing exception to the single-value default,
+not an instance of rule 4. Beyond that pairing, output more than one
+specific value only if rule 4's ambiguity standard is genuinely met (e.g.
+the firm is independently and clearly described as occupying two distinct
+roles); do not stack values speculatively.
 // "carrying_firm"       → person says their firm carries, clears, holds
 //                        custody, or computes margin/capital for other
 //                        firms' or their own customer accounts
@@ -1830,7 +1856,11 @@ person needing to create, retain, submit, sign, or receive a written
 document, form, disclosure, or authorization.
 
 frequency -- how often, if a specific cadence is actually stated (not
-implied by "I have to..." obligation language).
+implied by "I have to..." obligation language). Normally output a single
+value. Output more than one value only if rule 4's ambiguity standard is
+genuinely met -- e.g. the situation clearly states two distinct, actually
+applicable cadences for two distinct parts of the same activity -- not
+because a cadence is loosely implied alongside the stated one.
 // "ongoing"       → person describes a standing state to maintain
 //                  continuously, not a one-off event
 // "annual"        → "once a year," "yearly"
@@ -1852,8 +1882,16 @@ reporting_recipient -- who something is reported/disclosed to, if stated.
 // "other" → a recipient is stated but isn't in the list above
 // null → no reporting/notification is described
 
-numeric_value (string or null) -- any specific dollar amount, percentage,
-or count mentioned, as plain text (e.g. "$500", "10%", "3 accounts").
+numeric_value (string, or list of strings when more than one applies,
+or null) -- any specific dollar amount, percentage, or count mentioned.
+Normally output a single plain-text string (e.g. "$500"), or null if
+no figure is stated. Output a list of separate plain-text items (e.g.
+["10%", "3 accounts"]) only if rule 4's ambiguity/multiplicity standard
+is genuinely met -- i.e. more than one distinct figure is stated and each
+is clearly and independently relevant to the obligation being assessed --
+not because a single figure is restated in two forms and not because an
+incidental figure is mentioned in passing. Do not use a list of one item;
+if only one figure qualifies, output it as a plain string.
 
 uncertain_fields (list of field names, always returned -- can be empty)
 // A COMPLETE, freshly-derived list of which fields among
@@ -1927,7 +1965,10 @@ be needed to re-derive uncertain_fields in a future turn.
 
 CLARIFICATION_SYSTEM_PROMPT = """You are given a user's situation, the facts \
 already known about it, and a set of candidate FINRA clauses pulled from a \
-first-pass search (with their actual text). Decide two separate things:
+first-pass search (with their actual text). If the user is unsure about something, \
+do not treat it as AMBIGUITY or a GAP. To determine what the user is unsure about, \
+refer to "Fields the user has already said they don't know" as well as the situation \
+so far. Decide two separate things:
 
 1. AMBIGUITY -- Is the user's underlying QUESTION itself open to more than \
 one meaning, where each meaning points at a genuinely different set of \
@@ -1955,7 +1996,12 @@ reporting_recipient, numeric_value.
    on one side of a threshold or another)? If yes, list it as a gap, phrased
    as a natural-language question about that field. A gap must be
    load-bearing: if you already know the answer would be complete and
-   correct without asking it, do NOT list it.
+   correct without asking it, do NOT list it. Also, if you are fully sure that
+   the user's situation does not require knowing the value for that field in 
+   order to determine which candidate clauses apply, then do NOT list it 
+   (for example, if the situation concerns only the firm's own employees rather than 
+   outside clients, do not ask whether customers are involved, unless resolving 
+   that specific gap would genuinely change which clauses apply).
 
    Common real gaps: has_financial_threshold=true on a candidate and no
    numeric_value provided yet; the entity type asking (retail vs.
@@ -2014,7 +2060,8 @@ their full text) pulled from the database.
 ## Your task, in order
 
 1. Read every candidate clause's text carefully against the situation \
-and identify the clauses which are relevant to the situation.
+and identify the clauses which are relevant to the situation. Refer to \
+the list of relevance roles below to understand what relevance means here.
 2. For each clause that is actually relevant, assign it exactly one \
 relevance_role (see definitions below) and write 2-4 sentences of \
 reasoning: which fact in the situation triggers this clause, and what it \
@@ -2092,7 +2139,9 @@ customer, regulator, or other party.
 - **cross_reference**: A parent, child, or related clause that isn't \
 itself the answer but is needed to correctly frame or scope another \
 relevant clause (e.g. the general provision a specific child clause falls \
-under).
+under, or a clause establishing a structural/organizational relationship \
+between parties that explains why a particular party is responsible for \
+carrying out an obligation imposed by another clause).
 - **table_row**: A specific row, value, or category within a table-based \
 clause (e.g. a threshold table), rather than a freestanding provision.
 """
