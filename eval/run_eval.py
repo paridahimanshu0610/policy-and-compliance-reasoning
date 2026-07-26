@@ -11,7 +11,7 @@ For every (question, eval_case) pair discovered by eval/loader.py:
      there (terminated_via="human_handoff_prompt"); the simulated user
      never answers the consent/name/email/note interrupt sequence, since
      that's a real judgment call (and potential PII fabrication) we don't
-     want a synthetic user making. See agent/graph_patch.md for the
+     want a synthetic user making. See agent/graph.py for the
      run_turn() callbacks patch this depends on.
   2. Pull the full final AgentState via graph.get_state(...) (clause_graph,
      situation_summary, clarification_count, reasoning_cycles,
@@ -23,12 +23,6 @@ For every (question, eval_case) pair discovered by eval/loader.py:
   4. Write one JSON record per question to
      {EVAL_OUTPUT_DIR}/{run_id}/records.jsonl, and a rolled-up summary to
      {EVAL_OUTPUT_DIR}/{run_id}/summary.json (eval/aggregate.py).
-
-Requires the additive patches described in:
-  agent/state_patch.md, agent/reasoner_patch.md, agent/graph_patch.md
-and the appended blocks in:
-  config/settings_additions.py, config/prompts_additions.py
-to already be applied to your actual project files.
 """
 
 import argparse
@@ -195,6 +189,7 @@ def compute_record(item: EvalItem, run: dict) -> dict:
         }
 
         # --- hallucination: clause_ref grounding (hard fail, deterministic) ---
+        # Determines if final answer includes any clause outside the clause_graph because of hallucination
         clause_ref_grounding = det.clause_ref_grounding(final_answer, clause_graph)
 
         # --- hallucination: groundedness per matched+extra clause actually cited ---
