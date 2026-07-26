@@ -18,16 +18,15 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
-
-from deepagents import create_deep_agent
+from langchain.agents.middleware import AgentMiddleware
 from langchain.agents import create_agent
+from deepagents import create_deep_agent
 
 from agent.state import AgentState
 from agent.llm import get_chat_model
 from agent.retrieval_tools import REASONER_TOOLS
 from config import prompts
 from config.settings import MAX_REASONING_CYCLES
-from langchain.agents.middleware import AgentMiddleware
 
 # ---------------------------------------------------------------------------
 # Structured output the reasoner must produce
@@ -65,6 +64,52 @@ class ReasonerOutput(BaseModel):
 # per-invocation (conversation state is whatever we pass into .invoke()).
 _reasoner_agent = None
 
+def _normalize_args(args: dict) -> str:
+    """Canonical string form of tool args so equivalent calls compare equal
+    regardless of key order, list order in clause_ref lists, etc."""
+    def _norm(v):
+        if isinstance(v, list):
+            return sorted(_norm(x) for x in v)
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+    normalized = {k: _norm(v) for k, v in (args or {}).items()}
+    return json.dumps(normalized, sort_keys=True, default=str)
+
+class DedupToolCallMiddleware(AgentMiddleware):
+    """Short-circuits a tool call if the exact same tool + args has already
+    been called earlier in this run, returning the cached result instead of
+    re-invoking the tool."""
+
+    def wrap_tool_call(self, request, handler):
+        tool_name = request.tool_call["name"]
+        key = (tool_name, _normalize_args(request.tool_call.get("args", {})))
+
+        messages = request.state.get("messages", [])
+
+        seen: dict[tuple, str] = {}
+        for msg in messages:
+            if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                for tc in msg.tool_calls:
+                    seen_key = (tc["name"], _normalize_args(tc.get("args", {})))
+                    seen.setdefault(seen_key, tc["id"])
+
+        prior_call_id = seen.get(key)
+        if prior_call_id and prior_call_id != request.tool_call["id"]:
+            for msg in messages:
+                if isinstance(msg, ToolMessage) and msg.tool_call_id == prior_call_id:
+                    return ToolMessage(
+                        content=(
+                            f"[deduped] {tool_name} was already called with these "
+                            f"exact arguments earlier in this task. Reusing that "
+                            f"result rather than calling the tool again:\n\n{msg.content}"
+                        ),
+                        tool_call_id=request.tool_call["id"],
+                        name=tool_name,
+                    )
+
+        return handler(request)
+    
 class SanitizeNoneContentMiddleware(AgentMiddleware):
     def wrap_model_call(self, request, handler):
         for msg in request.messages:
@@ -84,7 +129,7 @@ def _get_reasoner_agent(use_tools: bool = False):
             tools=REASONER_TOOLS if use_tools else None,
             system_prompt=system_prompt,
             response_format=ReasonerOutput,
-            middleware=[SanitizeNoneContentMiddleware()],
+            middleware=[SanitizeNoneContentMiddleware(),  DedupToolCallMiddleware()],
         )
     return _reasoner_agent
 
