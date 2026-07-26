@@ -16,14 +16,20 @@ load_dotenv(override=True)
 
 # ── Project root ──────────────────────────────────────────────────────────────
 # Resolved from this file's location: config/ is one level below root
-BASE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # ── Data paths ────────────────────────────────────────────────────────────────
-DATA_DIR              = BASE_DIR / "data"
+DATA_DIR              = PROJECT_ROOT / "data"
 CHROMA_PATH           = DATA_DIR / "chromadb"
 PARSED_CHECKPOINT     = DATA_DIR / "parsed_rules.json"
 NORMALIZED_CHECKPOINT = DATA_DIR / "aggregate_normalized_clauses.jsonl"
 HTML_DIR = DATA_DIR / "FINRA_Rules"
+
+# ---------------------------------------------------------------------------
+# Eval paths
+# ---------------------------------------------------------------------------
+EVAL_DATA_DIR = DATA_DIR / "evals"
+EVAL_OUTPUT_DIR = DATA_DIR / "eval_results" / "agent"
 
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
 COLLECTION_NAME = "finra_clauses"
@@ -31,7 +37,7 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 BATCH_SIZE      = 50        # documents per ChromaDB write call
 
 # ── Model paths ───────────────────────────────────────────────────────────────
-MODELS_DIR = BASE_DIR / "models"
+MODELS_DIR = PROJECT_ROOT / "models"
 
 MODEL_CONFIGS = {
     "qwen": {
@@ -93,6 +99,8 @@ ACTIVE_LLM = {
     "clarify":     "o3",
     "reasoner":    "o3",
     "scope_guard": "o3",
+    "judge":        "o3",
+    "user_simulator":"o3"
 }
 
 # ---------------------------------------------------------------------------
@@ -126,6 +134,23 @@ MAX_CLARIFICATION_TURNS = 5
 # Safety cap: max retrieve -> reason cycles within a single turn, in case the
 # reasoner keeps asking for "just one more search".
 MAX_REASONING_CYCLES = 5
+
+# ---------------------------------------------------------------------------
+# Eval-loop caps
+# ---------------------------------------------------------------------------
+# How many simulated-user turns we'll answer clarifying questions for before
+# giving up on a question and marking it as a clarification-loop failure.
+# A couple turns of headroom above the system's own cap so we can also
+# observe (and flag) cases where the system asks MORE questions than its
+# own MAX_CLARIFICATION_TURNS should allow -- that itself is a bug worth
+# catching, not something to silently paper over by capping identically.
+MAX_SIMULATED_USER_TURNS = MAX_CLARIFICATION_TURNS + 2
+
+# Simulated-user temperature -- slightly non-zero so phrasing doesn't feel
+# robotic/identical across repeated eval runs, but still low since the
+# CONTENT of its answers must stay strictly grounded (temperature affects
+# phrasing here, not fact selection, since the prompt forces grounding).
+USER_SIMULATOR_TEMPERATURE = 0.3
 
 # ---------------------------------------------------------------------------
 # Human-in-the-loop escalation / compliance-agent handoff

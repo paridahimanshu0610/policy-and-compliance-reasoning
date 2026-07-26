@@ -142,7 +142,7 @@ def get_graph():
     return _compiled_graph
 
 
-def run_turn(user_message: str, thread_id: str) -> dict:
+def run_turn(user_message: str, thread_id: str, callbacks: list | None = None) -> dict:
     """
     Advance a conversation by one user message.
  
@@ -163,6 +163,8 @@ def run_turn(user_message: str, thread_id: str) -> dict:
     """
     graph = get_graph()
     config = {"configurable": {"thread_id": thread_id}}
+    if callbacks:
+        config["callbacks"] = callbacks
  
     # If the graph is currently paused inside human_handoff_node's
     # interrupt() sequence, this turn's message is the user's answer to that

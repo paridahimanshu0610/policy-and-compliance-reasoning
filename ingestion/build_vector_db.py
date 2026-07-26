@@ -406,6 +406,11 @@ def get_clause_by_ref(
     ref_to_payload = dict(zip(id_to_ref.values(), payloads))
     ordered_payloads = [ref_to_payload[ref] for ref in refs]
 
+    # Removing "original_clause" key
+    for clause in ordered_payloads:
+        if isinstance(clause, dict) and "original_clause" in clause: 
+            del clause["original_clause"]
+
     if is_single:
         return ordered_payloads[0]
     return ordered_payloads

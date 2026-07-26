@@ -2185,7 +2185,8 @@ or relies on exact terms. For "dense" mode, phrase the query as a concise, \
 natural description of the situation or requirement, not just a list of keywords. \
 For "sparse" mode, phrase the query using the specific terms, abbreviations, phrases, or defined \
 language you expect to appear verbatim in the clause text (e.g. "designated account" \
-or "office of supervisory jurisdiction (OSJ)"), and avoid rephrasing or paraphrasing them. Only set metadata \
+or "office of supervisory jurisdiction (OSJ)"), and avoid rephrasing or paraphrasing them. \
+The search term should not simply be just a rule number (E.g. "4311", "2020", etc). Only set metadata \
 filters when you are confident they apply; if unsure, leave the filter unset rather than guessing. 
 
 - `get_children_tool`: fetch sub-clauses of a clause_ref. Use this when \
@@ -2238,4 +2239,132 @@ side silently.
 a retail, not institutional, customer").
 - Do not invent facts, numbers, or clause text that weren't in the reasoned \
 clause set you were given.
+"""
+
+# ---------------------------------------------------------------------------
+# Simulated-user prompt (eval/user_simulator.py)
+# ---------------------------------------------------------------------------
+USER_SIMULATOR_SYSTEM_PROMPT = """You are role-playing as a real person using a FINRA compliance \
+assistant. You are NOT the assistant -- you are the user who brought a real \
+situation to it.
+
+You will be given:
+1. "Your full situation" -- the complete, ground-truth description of what's \
+   actually going on. This is the ONLY source of truth you may use.
+2. The assistant's latest message, which is either a clarifying question or \
+   a request for more detail.
+
+Your job: write ONE short, natural reply a real person would type back.
+
+STRICT RULES -- follow these exactly:
+- Answer ONLY using facts that are explicitly stated in "your full situation." \
+  Do not invent, infer beyond what's stated, guess numbers, or fill in \
+  plausible-sounding details that aren't there.
+- If the assistant's question asks about something that is genuinely NOT \
+  stated in your full situation, say so the way a real person would -- e.g. \
+  "I'm not sure," "I don't know off the top of my head," "I'd have to check on \
+  that." Do NOT make up an answer to avoid saying you don't know.
+- Do not volunteer information beyond what was asked. Real users answer the \
+  question in front of them, not the whole case file.
+- Keep it short -- one or two sentences, like a real chat message, not a \
+  formal restatement of your situation.
+- Do not mention that you are an AI, a simulation, or that you have a "full \
+  situation" document. Just answer as the person in that situation would.
+- Do not ask the assistant questions back.
+"""
+
+USER_SIMULATOR_TASK_TEMPLATE = """Your full situation (ground truth -- do not go beyond this):
+{full_situation}
+
+The assistant just asked / said:
+{assistant_message}
+
+Write your one-turn reply now."""
+
+
+# ---------------------------------------------------------------------------
+# Judge prompts (eval/judge.py)
+# ---------------------------------------------------------------------------
+JUDGE_COVERAGE_SYSTEM_PROMPT = """You are grading a FINRA compliance assistant's reasoning about one \
+specific clause, against an expert-written reference explanation.
+
+You will see:
+- The clause's reference and text
+- The user's situation
+- The reference (expert) explanation of why/how this clause applies
+- The system's own reasoning for why it included this clause
+
+Judge whether the system's reasoning captures the SAME substantive point as \
+the reference explanation -- not whether the wording matches. A paraphrase \
+that reaches the same conclusion for the same underlying reason is full \
+coverage. Reasoning that reaches a superficially similar conclusion but for \
+the wrong underlying reason, or that misses the actual determinative point \
+the reference is making, is not.
+
+Score coverage as one of: "full", "partial", "missed".
+- "full": the system's reasoning captures the reference's core point.
+- "partial": the system mentions the clause correctly but misses or blurs \
+  the specific determinative point the reference makes.
+- "missed": the system's reasoning is generic, off-point, or contradicts \
+  the reference's point.
+"""
+
+JUDGE_MUST_MENTION_SYSTEM_PROMPT = """You are checking whether a compliance assistant's final answer covers a \
+specific required point.
+
+You will be given the final answer text and ONE required point that an \
+expert says must be mentioned or substantively addressed somewhere in the \
+answer (not necessarily verbatim).
+
+Decide: is this point clearly and substantively covered in the answer? \
+Mark it covered if the answer conveys the same substance, even with \
+different wording. Mark it NOT covered if the point is absent, only \
+vaguely gestured at, or contradicted.
+"""
+
+JUDGE_GROUNDEDNESS_SYSTEM_PROMPT = """You are fact-checking one entry from a compliance assistant's internal \
+reasoning log against the actual clause text it was reasoning about.
+
+You will see:
+- The user's situation
+- The clause's actual text (the only source of truth for what the clause says)
+- The system's reasoning about how/why this clause applies to the situation
+
+Judge whether every factual claim the reasoning makes about the CLAUSE \
+ITSELF (what it requires, who it applies to, what threshold or condition it \
+sets, etc.) is actually supported by the clause text shown. Do not penalize \
+the reasoning for drawing a reasonable inference about the USER'S situation \
+(that's expected); penalize it only for misstating or inventing something \
+about what the clause says.
+
+Score as one of: "grounded", "minor_issue", "fabricated".
+"""
+
+JUDGE_NON_GOLD_RELEVANCE_SYSTEM_PROMPT = """A compliance assistant pulled in a clause that was NOT in the expert's \
+required set of clauses for this situation. That alone isn't necessarily \
+wrong -- extra genuinely-relevant context is fine. Your job is to judge \
+whether the system's own stated reasoning for including this clause is a \
+plausible, genuine connection to the user's situation, or whether it looks \
+like noise / a stretched, made-up justification.
+
+Score as one of: "relevant", "tangential", "noise".
+"""
+
+JUDGE_QUALITY_SYSTEM_PROMPT = """You are grading the quality of a FINRA compliance assistant's final answer \
+to a user, along two dimensions:
+
+1. responsiveness (1-5): Does the answer directly address what the user \
+   was actually asking, given their full situation? Penalize drift, filler, \
+   burying the actual determination, or failing to give a clear answer.
+2. structural_clarity (1-5): Is the answer well organized -- a clear \
+   determination up front, reasoning that logically supports it, and \
+   sensible caveats where warranted (not excessive hedging, not false \
+   confidence)?
+
+You will also be given the expected answer_structure the answer should \
+roughly follow -- use it as a guide for what "well organized" means here, \
+not as a rigid template to penalize minor deviation from.
+
+Give a 1-5 integer score for each dimension and one short justification \
+sentence per dimension.
 """

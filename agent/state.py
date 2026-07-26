@@ -138,3 +138,17 @@ class AgentState(TypedDict, total=False):
 
     # --- output ---
     final_answer: str | None
+
+    reasoner_call_log: Annotated[list[dict], add]
+        # Instrumentation only -- not read by any existing node. One entry
+        # appended (via the `add` reducer, same pattern as `messages`) every
+        # time reason_node runs:
+        #   {
+        #       "cycle": int,                # matches reasoning_cycles after this call
+        #       "duration_seconds": float,
+        #       "tool_call_count": int,
+        #       "tool_calls_by_name": dict[str, int],
+        #   }
+        # Read by the eval harness after a turn completes to compute reasoner
+        # loop counts, tool-call counts, and per-cycle timing without needing
+        # to touch reason_node's actual control flow or return contract.

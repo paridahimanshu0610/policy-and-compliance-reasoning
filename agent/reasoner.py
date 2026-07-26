@@ -14,6 +14,7 @@ reasoning is already done and it's a writing task, not an investigation.
 """
 
 import json
+import time
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -27,6 +28,7 @@ from agent.llm import get_chat_model
 from agent.retrieval_tools import REASONER_TOOLS
 from config import prompts
 from config.settings import MAX_REASONING_CYCLES
+from ingestion.build_vector_db import get_clause_by_ref
 
 # ---------------------------------------------------------------------------
 # Structured output the reasoner must produce
@@ -172,29 +174,43 @@ def reason_node(state: AgentState) -> dict:
     ]
     task = (
         f"Full situation: {state.get('situation_summary') or state['raw_query']}\n\n"
-        # f"Known structured facts: {state.get('known_fields', {})}\n\n"
         f"Candidate clauses gathered so far:\n{json.dumps(clause_summaries, indent=2)}"
     )
-    
-    # with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/artifacts/test1.txt", "w", encoding="utf-8",) as f:
-    #     f.write(task)
+
+    # --- NEW: instrumentation start ---
+    _start = time.perf_counter()
+    # --- end new ---
 
     result = agent.invoke({"messages": [{"role": "user", "content": task}]})
-    output: ReasonerOutput = result["structured_response"] # result["messages"][-1] 
-    # tool_payloads = _extract_tool_clause_payloads(result["messages"])
+    output: ReasonerOutput = result["structured_response"]
+
+    # --- NEW: instrumentation end + tool-call tally ---
+    _duration = time.perf_counter() - _start
+    _tool_calls_by_name: dict[str, int] = {}
+    for msg in result.get("messages", []):
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                name = tc.get("name", "unknown")
+                _tool_calls_by_name[name] = _tool_calls_by_name.get(name, 0) + 1
+    _tool_call_count = sum(_tool_calls_by_name.values())
+    # --- end new ---
+
     initial_graph = {c["clause_ref"]: c for c in state.get("clause_graph", [])}
     new_graph = {}
+
+    tool_retrieved_clause_refs = [reasoned.clause_ref for reasoned in output.clauses if reasoned.clause_ref not in initial_graph]
+    tool_retrieved_clauses = get_clause_by_ref(tool_retrieved_clause_refs)
+    tool_retrieved_clauses = {clause["clause_ref"]:clause for clause in tool_retrieved_clauses}
+
     for reasoned in output.clauses:
         if reasoned.clause_ref in initial_graph:
-            new_graph[reasoned.clause_ref ] = initial_graph[reasoned.clause_ref]
+            new_graph[reasoned.clause_ref] = initial_graph[reasoned.clause_ref]
             new_graph[reasoned.clause_ref]["relevance_role"] = reasoned.relevance_role
             new_graph[reasoned.clause_ref]["reasoning"] = reasoned.reasoning
         else:
-            # The reasoner pulled in a clause via a tool call (e.g. a cross
-            # reference) that wasn't in our pre-expanded set -- keep it.
             new_graph[reasoned.clause_ref] = {
                 "clause_ref": reasoned.clause_ref,
-                "payload": {}, # tool_payloads.get(reasoned.clause_ref, {}),  # not fetched here; synthesis only needs clause_ref + reasoning
+                "payload": tool_retrieved_clauses.get(reasoned.clause_ref, {}),
                 "relevance_role": reasoned.relevance_role,
                 "reasoning": reasoned.reasoning,
                 "provenance": "reasoner_tool_call",
@@ -208,10 +224,14 @@ def reason_node(state: AgentState) -> dict:
         "conflicts": [c.model_dump() for c in output.conflicts],
         "out_of_scope": output.out_of_scope,
         "scope_note": output.scope_note,
-        # Stop looping once we hit the cap even if the reasoner still wants more --
-        # better to answer with caveats than loop forever.
         "needs_more_search": None if (output.sufficient or hit_cap) else output.needs,
         "reasoning_cycles": cycles,
+        "reasoner_call_log": [{
+            "cycle": cycles,
+            "duration_seconds": round(_duration, 3),
+            "tool_call_count": _tool_call_count,
+            "tool_calls_by_name": _tool_calls_by_name,
+        }],
     }
 
 
