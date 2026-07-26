@@ -135,32 +135,6 @@ def _get_reasoner_agent(use_tools: bool = False):
         )
     return _reasoner_agent
 
-def _extract_tool_clause_payloads(messages) -> dict[str, dict]:
-    """Map clause_ref -> payload for any clauses the reasoner fetched via tool calls."""
-    call_id_to_ref: dict[str, str] = {}
-    for msg in messages:
-        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-            for tc in msg.tool_calls:
-                args = tc.get("args", {}) or {}
-                # adjust key name(s) to match whatever REASONER_TOOLS actually accept
-                ref = args.get("clause_ref") or args.get("ref")
-                if ref:
-                    call_id_to_ref[tc["id"]] = ref
-
-    payloads: dict[str, dict] = {}
-    for msg in messages:
-        if isinstance(msg, ToolMessage):
-            ref = call_id_to_ref.get(msg.tool_call_id)
-            if not ref:
-                continue
-            content = msg.content
-            try:
-                parsed = json.loads(content) if isinstance(content, str) else content
-            except (json.JSONDecodeError, TypeError):
-                parsed = {"raw": content}
-            payloads[ref] = parsed
-    return payloads
-
 def reason_node(state: AgentState) -> dict:
     """Hand the working clause_graph to the deep agent, let it investigate
     (chase cross-references, pull more context, etc.) and return its
