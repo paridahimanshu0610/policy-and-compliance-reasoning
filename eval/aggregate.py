@@ -9,7 +9,7 @@ re-run/tweaked against an existing results JSONL without re-running the
 """
 
 from collections import defaultdict
-from statistics import mean
+from statistics import mean, median, stdev
 from typing import Any, Optional
 
 
@@ -21,6 +21,28 @@ def _safe_mean(values: list[Optional[float]]) -> Optional[float]:
 def _rate(bools: list[Optional[bool]]) -> Optional[float]:
     clean = [b for b in bools if b is not None]
     return round(sum(1 for b in clean if b) / len(clean), 4) if clean else None
+
+
+def _time_stats(records: list[dict]) -> dict:
+    """Wall-clock time (in seconds) taken to fully process one eval item --
+    i.e. drive_conversation() + compute_record() end to end, as timed
+    around each item in run_eval.run() and stored on the record as
+    "wall_clock_seconds". This is the right field for "how long did this
+    question take" (as opposed to e.g. summing reasoner_call_log durations,
+    which only covers time spent inside the reasoner node, not intake,
+    retrieval, clarification turns, or judge calls)."""
+    times = [r["wall_clock_seconds"] for r in records if r.get("wall_clock_seconds") is not None]
+
+    if not times:
+        return {"average_time": None, "median_time": None, "min_time": None, "max_time": None, "std_dev": None}
+
+    return {
+        "average_time": round(mean(times), 4),
+        "median_time": round(median(times), 4),
+        "min_time": round(min(times), 4),
+        "max_time": round(max(times), 4),
+        "std_dev": round(stdev(times), 4) if len(times) >= 2 else 0.0,
+    }
 
 
 def summarize(records: list[dict]) -> dict:
@@ -96,6 +118,7 @@ def summarize(records: list[dict]) -> dict:
             "avg_total_tokens": _safe_mean([r["token_usage"]["total_tokens"] for r in records]),
             "sum_total_tokens": sum(r["token_usage"]["total_tokens"] for r in records),
         },
+        "time_taken": _time_stats(records),
     }
 
 
