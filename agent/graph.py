@@ -45,7 +45,7 @@ from agent.scope_guard import scope_gate_node, out_of_scope_node
 from agent.human_handoff import human_handoff_node
 from agent.reasoner import reason_node, synthesize_node
 from agent.pii import unmask_pii
-from config.settings import MAX_CLARIFICATION_TURNS
+from config.settings import MAX_CLARIFICATION_TURNS, FINRA_BASE_URL
 
 
 def _route_after_scope_gate(state: AgentState) -> str:
@@ -215,7 +215,7 @@ def run_turn(user_message: str, thread_id: str, callbacks: list | None = None) -
             "type": "answer",
             "content": unmask_pii(result["final_answer"], pii_map),
             "trace": [
-                {"clause_ref": c["clause_ref"], "relevance_role": c["relevance_role"], "reasoning": c["reasoning"]}
+                {"clause_ref": c["clause_ref"], "relevance_role": c["relevance_role"], "reasoning": c["reasoning"], "rule_url": c["payload"].get("rule_url", FINRA_BASE_URL)}
                 for c in result.get("clause_graph", [])
                 if c.get("relevance_role")
             ],

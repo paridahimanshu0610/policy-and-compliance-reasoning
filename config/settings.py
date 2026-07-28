@@ -173,6 +173,7 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").strip().lower() in ("1", "true"
 # to match the authenticated account.
 SMTP_FROM_ADDRESS = os.getenv("SMTP_FROM_ADDRESS", SMTP_USERNAME)
 
+FINRA_BASE_URL = "https://www.finra.org/rules-guidance/rulebooks/finra-rules"
 
 SERIES_MAP = {
     "2010": "2000", "2020": "2000", "2030": "2000", "2040": "2000",
