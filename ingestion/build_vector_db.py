@@ -35,6 +35,7 @@ from fastembed import SparseTextEmbedding
 import os
 from dotenv import load_dotenv
 import voyageai
+from config.settings import DATA_DIR
 
 load_dotenv()
 
@@ -693,7 +694,7 @@ def main() -> None:
 
     # Usage example (uncomment and provide real data/embeddings):
     
-    with open("/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning/data/embedded_clauses/finra_clauses_embedded__voyage-law-2.jsonl", "r") as f:
+    with open(DATA_DIR / "embedded_clauses" / "finra_clauses_embedded__voyage-law-2.jsonl", "r") as f:
         new_clauses = [json.loads(line) for line in f]
     upsert_clauses(new_clauses)
     

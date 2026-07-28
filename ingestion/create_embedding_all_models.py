@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
+from config.settings import PROJECT_ROOT, NORMALIZED_CHECKPOINT
 
 from .embedders import get_embedder
 
@@ -179,10 +180,10 @@ if __name__ == "__main__":
     # print(f"First 5 values: {test_embedding[:5]}")
     # raise SystemExit  # bail out before running the full pipeline below
 
-    project_dir = "/Users/himanshu/Documents/Projects/policy-and-compliance-reasoning"
+    project_dir = PROJECT_ROOT
 
     # Load your raw clauses
-    clauses = load_clauses(f"{project_dir}/data/aggregate_normalized_clauses.jsonl")
+    clauses = load_clauses(NORMALIZED_CHECKPOINT)
     clauses = [c for c in clauses] # if (c["rule_id"].startswith("3") or c["rule_id"].startswith("4"))
 
     # Build the embedder for the configured model.
