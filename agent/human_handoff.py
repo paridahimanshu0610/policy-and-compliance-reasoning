@@ -130,10 +130,11 @@ def human_handoff_node(state: AgentState) -> dict:
             "add more detail, or if you change your mind about reaching an agent."
         )
         updates: dict = {
-            "final_answer": decline_message,
-            "messages": [AIMessage(content=decline_message)],
-            "escalation_reason": None,
-        }
+                    "final_answer": decline_message,
+                    "messages": [AIMessage(content=decline_message)],
+                    "escalation_reason": None,
+                    "turn_output_type": "answer",
+                }
         # Give the agent a fresh budget rather than re-offering the handoff on
         # every subsequent turn -- only reset whichever counter actually
         # caused this escalation (a "user_requested" handoff wasn't
@@ -184,10 +185,11 @@ def human_handoff_node(state: AgentState) -> dict:
         )
 
     return {
-        "final_answer": confirmation,
-        "messages": [AIMessage(content=confirmation)],
-        "handoff_name": name.strip(),
-        "handoff_email": email.strip(),
-        "handoff_note": note,
-        "handoff_sent": sent_ok,
-    }
+            "final_answer": confirmation,
+            "messages": [AIMessage(content=confirmation)],
+            "handoff_name": name.strip(),
+            "handoff_email": email.strip(),
+            "handoff_note": note,
+            "handoff_sent": sent_ok,
+            "turn_output_type": "answer",
+        }

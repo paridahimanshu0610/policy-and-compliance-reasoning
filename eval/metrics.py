@@ -85,8 +85,13 @@ def matched_and_extra_clauses(
 # look like "FINRA-3110", "FINRA-4210(e)(2)(H)(i)e.2.A.", "Rule 2210", etc.
 # This intentionally over-matches slightly (better to flag a false positive
 # for manual review than silently miss a real citation).
+# _CLAUSE_REF_PATTERN = re.compile(
+#     r"\bFINRA-\d+(?:\([^\s()]{1,6}\)|[A-Za-z0-9]{1,3}\.)*"
+# )
 _CLAUSE_REF_PATTERN = re.compile(
-    r"\bFINRA-\d+(?:\([^\s()]{1,6}\)|[A-Za-z0-9]{1,3}\.)*"
+    r"\bFINRA-\d+"
+    r"(?:\([^\s()]{1,6}\)|[A-Za-z][A-Za-z0-9]{0,2}\.)"      # required first clause segment
+    r"(?:\([^\s()]{1,6}\)|[A-Za-z0-9]{1,3}\.?)*"            # optional further segments
 )
 
 

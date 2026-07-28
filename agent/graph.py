@@ -38,6 +38,7 @@ from agent.nodes import (
     clarification_and_reason_cap_check_node,
     clarify_node,
     expand_node,
+    explain_node,
     _needs_clarify
 )
 from agent.scope_guard import scope_gate_node, out_of_scope_node
@@ -50,6 +51,8 @@ from config.settings import MAX_CLARIFICATION_TURNS
 def _route_after_scope_gate(state: AgentState) -> str:
     if state.get("wants_human_agent"):
         return "human_handoff"
+    if state.get("wants_explanation"):
+        return "explain"
     if not state.get("in_scope"):
         return "out_of_scope"
     return "intake"
@@ -95,6 +98,7 @@ def build_graph():
     g.add_node("ambiguity_and_gap_check", ambiguity_and_gap_check_node)   # was: ambiguity_check + gap_analysis
     g.add_node("clarification_and_reason_cap_check", clarification_and_reason_cap_check_node)
     g.add_node("clarify", clarify_node)
+    g.add_node("explain", explain_node)
     g.add_node("retrieve", retrieve_node)
     g.add_node("expand", expand_node)
     g.add_node("reason", reason_node)
@@ -106,10 +110,15 @@ def build_graph():
     g.add_conditional_edges(
         "scope_gate",
         _route_after_scope_gate,
-        {"human_handoff": "human_handoff", "out_of_scope": "out_of_scope", "intake": "intake"},
+        {
+            "human_handoff": "human_handoff",
+            "out_of_scope": "out_of_scope",
+            "explain": "explain",
+            "intake": "intake",
+        },
     )
     g.add_edge("out_of_scope", END)
-
+    g.add_edge("explain", END)
     g.add_edge("intake", "retrieve")
     g.add_edge("retrieve", "ambiguity_and_gap_check")
     g.add_edge("ambiguity_and_gap_check", "clarification_and_reason_cap_check")
@@ -192,14 +201,19 @@ def run_turn(user_message: str, thread_id: str, callbacks: list | None = None) -
         payload = result["__interrupt__"][0].value
         question = payload.get("question", str(payload)) if isinstance(payload, dict) else str(payload)
         return {"type": "human_handoff_prompt", "content": unmask_pii(question, pii_map)}
- 
-    if result.get("final_answer"):
+
+    output_type = result.get("turn_output_type")
+
+    if output_type == "explanation":
+        return {
+            "type": "explanation",
+            "content": unmask_pii(result["messages"][-1].content, pii_map),
+        }
+
+    if output_type == "answer" or output_type == "out_of_scope":
         return {
             "type": "answer",
             "content": unmask_pii(result["final_answer"], pii_map),
-            # The trace is what you'd diff against ground_truth_clauses in
-            # your eval set later: clause_ref + role + reasoning for every
-            # clause that made it into the answer.
             "trace": [
                 {"clause_ref": c["clause_ref"], "relevance_role": c["relevance_role"], "reasoning": c["reasoning"]}
                 for c in result.get("clause_graph", [])
@@ -207,9 +221,13 @@ def run_turn(user_message: str, thread_id: str, callbacks: list | None = None) -
             ],
             "conflicts": result.get("conflicts", []),
         }
- 
-    # The graph stopped at "clarify" -- the question we want to show the
-    # user is the last message added to the transcript.
+
+    if output_type == "clarification":
+        last_message = result["messages"][-1]
+        return {"type": "clarification", "content": unmask_pii(last_message.content, pii_map)}
+
+    # Fallback -- should not normally be hit; every terminal node now stamps
+    # turn_output_type. Kept only as a defensive default.
     last_message = result["messages"][-1]
     return {"type": "clarification", "content": unmask_pii(last_message.content, pii_map)}
 

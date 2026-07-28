@@ -225,11 +225,14 @@ def synthesize_node(state: AgentState) -> dict:
             "or outside FINRA's rules entirely -- worth checking with a "
             "compliance professional."
         )
-        return {"final_answer": note}
+        return {"final_answer": note, "turn_output_type": "answer"}
 
     relevant = [c for c in state.get("clause_graph", []) if c.get("relevance_role")]
     if not relevant:
-        return {"final_answer": "I wasn't able to find a clause that clearly applies to this situation. Could you share a bit more detail?"}
+        return {
+            "final_answer": "I wasn't able to find a clause that clearly applies to this situation. Could you share a bit more detail?",
+            "turn_output_type": "answer",
+        }
 
     llm = get_chat_model("reasoner")
     context = {
@@ -246,4 +249,4 @@ def synthesize_node(state: AgentState) -> dict:
         HumanMessage(content=json.dumps(context, indent=2)),
     ])
 
-    return {"final_answer": response.content}
+    return {"final_answer": response.content, "turn_output_type": "answer"}

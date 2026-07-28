@@ -152,3 +152,18 @@ class AgentState(TypedDict, total=False):
         # Read by the eval harness after a turn completes to compute reasoner
         # loop counts, tool-call counts, and per-cycle timing without needing
         # to touch reason_node's actual control flow or return contract.
+
+    # --- meta / auxiliary requests ---
+    wants_explanation: bool
+    # True if the user's latest message is a meta-question about something
+    # already in play (a term, a clause, the reasoning just given) rather
+    # than a new fact about their situation. Set by scope_gate_node.
+
+    # --- output routing ---
+    turn_output_type: str | None
+    # Explicitly stamped by whichever node ends the turn ("answer",
+    # "clarification", "explanation", "out_of_scope"). run_turn() reads
+    # this directly instead of inferring the outcome from whether
+    # final_answer happens to be truthy -- final_answer (like other state
+    # fields) persists across turns via the checkpointer, so "is it set"
+    # is not a safe proxy for "did THIS turn produce it."

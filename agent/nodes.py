@@ -26,6 +26,16 @@ from config.settings import MAX_CLARIFICATION_TURNS, MAX_REASONING_CYCLES
 from ingestion.build_vector_db import KEYWORD_FIELDS, BOOL_FIELDS
 
 
+def _last_substantive_ai_message(messages: list):
+    """Most recent AIMessage that wasn't an aside (e.g. an explanation
+    answer) -- an explanation exchange sitting in the transcript shouldn't
+    be mistaken for the clarifying question intake_node is tracking
+    continuity against."""
+    for msg in reversed(messages or []):
+        if isinstance(msg, AIMessage) and not msg.additional_kwargs.get("aside"):
+            return msg
+    return None
+
 # ---------------------------------------------------------------------------
 # 0. Mask input -- PII guardrail, runs before anything else touches raw_query
 # ---------------------------------------------------------------------------
@@ -95,7 +105,7 @@ def intake_node(state: AgentState) -> dict:
     known_so_far = state.get("known_fields", {})  # still used downstream, just not shown to this LLM call
 
     latest_user_query = state.get("raw_query")
-    latest_ai_message = state.get("messages", [])[-1] if state.get("messages") else None
+    latest_ai_message = _last_substantive_ai_message(state.get("messages", []))
 
     previous_gaps = json.dumps(
         [
@@ -381,10 +391,57 @@ def clarify_node(state: AgentState) -> dict:
         question = response.content
 
     return {
-        "messages": [AIMessage(content=question)],
-        "clarification_count": state.get("clarification_count", 0) + 1,
+            "messages": [AIMessage(content=question)],
+            "clarification_count": state.get("clarification_count", 0) + 1,
+            "turn_output_type": "clarification",
+        }
+
+
+# ---------------------------------------------------------------------------
+# 5b. Explain -- answer a meta-question without disturbing the main flow
+# ---------------------------------------------------------------------------
+
+def explain_node(state: AgentState) -> dict:
+    """Answers a user's question ABOUT the conversation so far (a term, a
+    clause, the last answer) without touching known_fields, gaps,
+    clarification_count, clause_graph roles, or final_answer. This is what
+    lets it fire safely whether we're mid-clarification-loop or already
+    done: nothing it does changes what the graph will pick up on the next
+    turn, so execution resumes exactly where it left off either way.
+
+    The AIMessage it produces is tagged aside=True so intake_node's
+    continuity-tracking (which AI message was the last real clarifying
+    question) skips right over it.
+    """
+    relevant = [c for c in state.get("clause_graph", []) if c.get("relevance_role")]
+
+    context = {
+        "user_question": state["raw_query"],
+        "situation_so_far": state.get("situation_summary") or "(not established yet)",
+        "final_answer_given_so_far": state.get("final_answer"),
+        "reasoned_clauses": [
+            {"clause_ref": c["clause_ref"], "role": c["relevance_role"], "reasoning": c["reasoning"]}
+            for c in relevant
+        ],
+        "pending_clarifying_question": (
+            state["messages"][-1].content
+            if state.get("messages") and not state.get("final_answer")
+            else None
+        ),
     }
 
+    llm = get_chat_model("explain")
+    response = llm.invoke([
+        SystemMessage(content=prompts.EXPLAIN_SYSTEM_PROMPT),
+        HumanMessage(content=json.dumps(context, indent=2)),
+    ])
+
+    ai_message = AIMessage(content=response.content, additional_kwargs={"aside": True})
+
+    return {
+        "messages": [ai_message],
+        "turn_output_type": "explanation",
+    }
 
 # ---------------------------------------------------------------------------
 # 6. Expand -- walk the clause hierarchy around the retrieved candidates

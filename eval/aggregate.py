@@ -119,6 +119,9 @@ def summarize(records: list[dict]) -> dict:
             "sum_total_tokens": sum(r["token_usage"]["total_tokens"] for r in records),
         },
         "time_taken": _time_stats(records),
+        "avg_explanation_events": _safe_mean([len(r["agentic"]["explanation_events"]) for r in records]),
+        "false_explain_trigger_rate": _rate([r["agentic"]["false_explain_triggers"] > 0 for r in records]),
+        "total_false_explain_triggers": sum(r["agentic"]["false_explain_triggers"] for r in records),
     }
 
 

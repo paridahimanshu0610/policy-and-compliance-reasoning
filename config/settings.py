@@ -74,7 +74,7 @@ TAMU_CONFIG = {
 
 LLM_MODELS = {
     "o3":          {**TAMU_CONFIG, "model": "protected.o3", "supports_temperature": False},
-    "claude_opus": {**TAMU_CONFIG, "model": "protected.Claude Opus 4.7", "supports_temperature": True},
+    "claude_opus": {**TAMU_CONFIG, "model": "protected.Claude Opus 4.7", "supports_temperature": False},
     "gpt5":        {**TAMU_CONFIG, "model": "protected.gpt-5", "supports_temperature": True},
     "gemini":      {**TAMU_CONFIG, "model": "protected.gemini-2.5-pro", "supports_temperature": True},
 }
@@ -99,8 +99,9 @@ ACTIVE_LLM = {
     "clarify":     "o3",
     "reasoner":    "o3",
     "scope_guard": "o3",
-    "judge":        "o3",
-    "user_simulator":"o3"
+    "judge":        "gemini",
+    "user_simulator":"claude_opus",
+    "explain":      "o3"
 }
 
 # ---------------------------------------------------------------------------

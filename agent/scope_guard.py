@@ -28,17 +28,20 @@ This assistant exists ONLY to help someone understand which FINRA rule or \
 clause applies to a specific situation they're dealing with (e.g. as a \
 broker-dealer employee, compliance officer, or registered representative).
 
-Given the ongoing conversation and the user's latest message, decide two \
+Given the ongoing conversation and the user's latest message, decide three \
 independent things:
 
 1. in_scope: Is this latest message part of a genuine attempt to describe, \
    ask about, or follow up on a FINRA compliance situation? This includes \
    follow-up answers to clarifying questions (like "yes", "$500", or a firm \
-   type), even if the message alone looks unrelated to FINRA -- check it \
-   against the ongoing situation summary. Mark False only for messages that \
-   are clearly unrelated to any compliance situation: small talk, weather, \
-   booking travel, general knowledge questions, requests unrelated to FINRA \
-   rules, etc.
+   type), and it includes messages that introduce a brand-new situation \
+   and ask, in the same breath, whether compliance rules apply to it \
+   (e.g. "I want to do X and Y, do I need to worry about compliance \
+   limits on either one?") -- that is a new compliance question, not a \
+   meta-question, even though it's phrased as one. Mark False only for \
+   messages that are clearly unrelated to any compliance situation: small \
+   talk, weather, booking travel, general knowledge questions, requests \
+   unrelated to FINRA rules, etc.
 
 2. wants_human_agent: Is the user, in this latest message, directly and \
    explicitly asking to be connected with, transferred to, or contacted by \
@@ -46,8 +49,36 @@ independent things:
    now? Only mark this True for a clear, direct request -- not for \
    frustration or a rhetorical remark.
 
+3. wants_explanation: Is the user asking to have something ALREADY \
+   DISCUSSED in this conversation explained or clarified for their own \
+   understanding -- as opposed to describing a situation (new or ongoing) \
+   and asking whether/how compliance rules apply to it?
+
+   wants_explanation requires that the question point BACKWARD at \
+   something specific that already exists in this conversation: a term \
+   the assistant or user already used, a clause or rule number the \
+   assistant already cited, or an answer the assistant already gave. \
+   Examples: "what counts as a 'third party' here?" (after that term was \
+   already used), "why does that clause apply?", "can you explain that \
+   last answer more simply?".
+
+   It does NOT apply just because the message is phrased as a question, \
+   and it does NOT apply to a message that introduces a new situation (or \
+   new details of an ongoing one) and asks whether compliance rules apply \
+   to it -- that is the core compliance question this assistant exists to \
+   answer, and belongs in the main flow (in_scope=True, \
+   wants_explanation=False), not here. When in doubt -- especially on the \
+   first message of a conversation, or any message that adds new facts \
+   about the user's situation -- default wants_explanation to False.
+
+   This is also different from answering a clarifying question the \
+   assistant just asked -- if the user is supplying new information about \
+   their own situation (even briefly, like "yes" or "$500"), that is NOT \
+   an explanation request either.
+
 A message can be in_scope=True and wants_human_agent=True at the same time \
-(e.g. "can I just talk to a real person about this FINRA issue instead").
+(e.g. "can I just talk to a real person about this FINRA issue instead"). \
+wants_explanation should only be True when in_scope is also True.
 """
 
 
@@ -57,6 +88,9 @@ class ScopeAssessment(BaseModel):
     )
     wants_human_agent: bool = Field(
         description="True if the user is directly asking to be connected with a human compliance agent right now."
+    )
+    wants_explanation: bool = Field(
+        description="True if the user wants something explained/clarified for their own understanding rather than stating a new fact about their situation."
     )
 
 
@@ -85,6 +119,7 @@ def scope_gate_node(state: AgentState) -> dict:
     updates: dict = {
         "in_scope": result.in_scope,
         "wants_human_agent": result.wants_human_agent,
+        "wants_explanation": result.wants_explanation and result.in_scope,
     }
     if result.wants_human_agent:
         updates["escalation_reason"] = "user_requested"
@@ -98,4 +133,5 @@ def out_of_scope_node(state: AgentState) -> dict:
     return {
         "final_answer": OUT_OF_SCOPE_MESSAGE,
         "messages": [AIMessage(content=OUT_OF_SCOPE_MESSAGE)],
+        "turn_output_type": "out_of_scope",
     }

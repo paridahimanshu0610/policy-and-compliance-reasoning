@@ -69,6 +69,8 @@ def drive_conversation(item: EvalItem) -> dict:
     transcript: list[dict] = []
     handoff_triggered = False
     simulated_user_turns = 0
+    explanation_events = []          # NEW: records each aside, for metrics/regression tracking
+    last_clarifying_question = None  # NEW: tracks the real pending question, distinct from any explanation content
     terminated_via = None
     final_answer = None
 
@@ -84,6 +86,7 @@ def drive_conversation(item: EvalItem) -> dict:
                 break
 
             if response["type"] == "clarification":
+                last_clarifying_question = response["content"]
                 if simulated_user_turns >= MAX_SIMULATED_USER_TURNS:
                     terminated_via = "clarification_loop_exhausted"
                     break
@@ -92,6 +95,36 @@ def drive_conversation(item: EvalItem) -> dict:
                     assistant_message=response["content"],
                 )
                 simulated_user_turns += 1
+                transcript.append({"role": "user", "content": user_reply})
+                response = run_turn(user_reply, thread_id, callbacks=callbacks)
+                transcript.append({"role": "assistant", "content": response["content"], "type": response["type"]})
+                continue
+
+            if response["type"] == "explanation":
+                # explain_node doesn't advance known_fields/gaps/clarification_count,
+                # so the conversation is exactly where it was before this fired.
+                # Flag it as a potential FALSE TRIGGER if it happened on turn 1 --
+                # there's nothing in the conversation yet for a meta-question to
+                # point backward at, so this is the specific failure mode we
+                # patched scope_gate for.
+                explanation_events.append({
+                    "turn_index": len(transcript),
+                    "content": response["content"],
+                    "likely_false_trigger": last_clarifying_question is None and simulated_user_turns == 0,
+                })
+                if len(explanation_events) >= MAX_SIMULATED_USER_TURNS:
+                    terminated_via = "explanation_loop_exhausted"
+                    break
+                if last_clarifying_question is None:
+                    # Nothing to re-answer -- this was the very first turn.
+                    # Can't meaningfully continue as a synthetic user; stop here
+                    # and let the flag above surface it in metrics.
+                    terminated_via = "unexpected_explanation_on_first_turn"
+                    break
+                user_reply = simulate_user_turn(
+                    full_situation=item.eval_case.get("full_situation", ""),
+                    assistant_message=last_clarifying_question,
+                )
                 transcript.append({"role": "user", "content": user_reply})
                 response = run_turn(user_reply, thread_id, callbacks=callbacks)
                 transcript.append({"role": "assistant", "content": response["content"], "type": response["type"]})
@@ -130,6 +163,7 @@ def drive_conversation(item: EvalItem) -> dict:
         "final_state": final_state,
         "handoff_triggered": handoff_triggered,
         "simulated_user_turns": simulated_user_turns,
+        "explanation_events": explanation_events,
         "total_graph_steps": total_graph_steps,
         "usage_by_model": usage_by_model,
     }
@@ -269,6 +303,10 @@ def compute_record(item: EvalItem, run: dict) -> dict:
         "handoff_triggered": run["handoff_triggered"],
         "escalation_reason_last_seen": final_state.get("escalation_reason"),
         "simulated_user_turns": run["simulated_user_turns"],
+        "explanation_events": run.get("explanation_events", []),
+        "false_explain_triggers": sum(
+            1 for e in run.get("explanation_events", []) if e["likely_false_trigger"]
+        ),
     }
 
     return {
