@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finra-compliance-agent"
+version = "0.1.0"
+description = "LangGraph-based FINRA compliance reasoning agent, with an optional MCP server front end."
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "deepagents>=0.1.0",
+    "pydantic>=2.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "qdrant-client>=1.9.0",
+    "fastembed>=0.3.0",
+    "voyageai>=0.3.0",
+]
+
+[project.optional-dependencies]
+# MCP is a client of the core retrieval/agent layer, not a hard dependency
+# of it -- agent/graph.py's run_turn() works fine with only the base
+# dependencies installed. Only install this extra if you're running
+# mcp_server/server.py.
+mcp = ["mcp[cli]>=1.2.0"]
+
+[tool.setuptools]
+# Explicit list, not `[tool.setuptools.packages.find]` -- the repo root also
+# has non-package directories (data/, qdrant_storage/, eval_results/,
+# artifacts/, frontend/, and previously the venv itself) that auto-discovery
+# would otherwise try to treat as top-level packages and fail on. List only
+# what's actually meant to be importable Python.
+packages = ["agent", "config", "ingestion", "mcp_server"]

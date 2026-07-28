@@ -8,3 +8,4 @@ logs
 *.pyc
 *.env
 qdrant_storage
+policy_mcp/
