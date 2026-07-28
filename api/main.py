@@ -17,7 +17,22 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.graph import run_turn
-from api.schemas import ChatRequest, ChatResponse, ClauseCitation, NewSessionResponse
+from api.content import (
+    GREETING_MESSAGE,
+    THINKING_WORDS,
+    THINKING_WORD_INTERVAL_MS,
+    GUIDELINES_PAGE_TITLE,
+    GUIDELINES,
+)
+from api.schemas import (
+    ChatRequest,
+    ChatResponse,
+    ClauseCitation,
+    GuidelineItem,
+    GuidelinesResponse,
+    NewSessionResponse,
+    UIConfigResponse,
+)
 from api.settings import ALLOWED_ORIGINS
 
 logger = logging.getLogger("finra_compliance_api")
@@ -39,7 +54,7 @@ app.add_middleware(
 
 def _build_trace(raw_trace: list[dict] | None) -> list[ClauseCitation] | None:
     """Reshape run_turn()'s raw trace (list of clause dicts) into
-    ClauseCitation models, pulling clause_ref + rule_url front and center.
+    ClauseCitation models. Only clause_ref + rule_url are surfaced.
 
     Tries a couple of plausible key names for the rule's source URL since
     the exact field name in clause_graph wasn't confirmed against
@@ -62,8 +77,6 @@ def _build_trace(raw_trace: list[dict] | None) -> list[ClauseCitation] | None:
             ClauseCitation(
                 clause_ref=clause.get("clause_ref", "unknown"),
                 rule_url=_first_present(clause, ["rule_url", "url", "source_url"]),
-                relevance_role=clause.get("relevance_role"),
-                reasoning=clause.get("reasoning"),
             )
         )
     return citations
@@ -72,6 +85,30 @@ def _build_trace(raw_trace: list[dict] | None) -> list[ClauseCitation] | None:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/api/ui-config", response_model=UIConfigResponse)
+def ui_config() -> UIConfigResponse:
+    """Copy the frontend needs before any conversation happens: the
+    empty-state greeting and the words to cycle through while thinking.
+    Backed entirely by api/content.py -- edit that file, not this route."""
+    return UIConfigResponse(
+        greeting_message=GREETING_MESSAGE,
+        thinking_words=THINKING_WORDS,
+        thinking_word_interval_ms=THINKING_WORD_INTERVAL_MS,
+    )
+
+
+@app.get("/api/guidelines", response_model=GuidelinesResponse)
+def guidelines() -> GuidelinesResponse:
+    """Content for the standalone guidelines page. Backed by
+    api/content.py's GUIDELINES list -- add/edit entries there."""
+    return GuidelinesResponse(guidelines=[GuidelineItem(**g) for g in GUIDELINES])
+
+
+@app.get("/api/guidelines-page-title")
+def guidelines_page_title() -> dict:
+    return {"title": GUIDELINES_PAGE_TITLE}
 
 
 @app.post("/api/session", response_model=NewSessionResponse)

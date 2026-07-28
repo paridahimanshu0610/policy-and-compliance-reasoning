@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Guidelines — Compliance Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#FFFFFF;
+    --surface:#F4F3EF;
+    --surface-line:#E4E1D8;
+    --ink:#1B212C;
+    --ink-soft:#6B7280;
+    --gold:#A8802A;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', sans-serif;
+    display:flex;
+    justify-content:center;
+  }
+  .page{
+    width:100%;
+    max-width:640px;
+    padding:0 20px 60px;
+  }
+  .redirect-banner{
+    margin:20px 0 0;
+    padding:12px 16px;
+    background:var(--surface);
+    border:1px solid var(--surface-line);
+    border-radius:8px;
+    font-size:13px;
+    color:var(--ink-soft);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .redirect-banner a{
+    color:var(--gold);
+    text-decoration:none;
+    white-space:nowrap;
+    font-weight:600;
+  }
+  .redirect-banner a:hover{ text-decoration:underline; }
+
+  h1{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:28px;
+    margin:28px 0 6px;
+  }
+  .subtitle{
+    color:var(--ink-soft);
+    font-size:14px;
+    margin:0 0 32px;
+  }
+
+  section.guideline{
+    padding:20px 0;
+    border-top:1px solid var(--surface-line);
+  }
+  section.guideline h2{
+    font-size:16px;
+    font-weight:600;
+    margin:0 0 6px;
+  }
+  section.guideline p{
+    margin:0;
+    color:var(--ink-soft);
+    font-size:14.5px;
+    line-height:1.6;
+  }
+
+  #status{
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="redirect-banner">
+    <span id="banner-title">This is the Guidelines page.</span>
+    <a href="index.html">← Back to chat</a>
+  </div>
+
+  <h1>Guidelines</h1>
+  <p class="subtitle">A few notes on how to use the Compliance Assistant.</p>
+
+  <div id="guidelines-list">
+    <p id="status">Loading…</p>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.API_BASE || "http://localhost:8000";
+const listEl = document.getElementById("guidelines-list");
+const bannerTitleEl = document.getElementById("banner-title");
+
+async function loadGuidelines() {
+  try {
+    const [titleRes, guidelinesRes] = await Promise.all([
+      fetch(`${API_BASE}/api/guidelines-page-title`),
+      fetch(`${API_BASE}/api/guidelines`),
+    ]);
+    if (!titleRes.ok || !guidelinesRes.ok) throw new Error("bad response");
+
+    const titleData = await titleRes.json();
+    bannerTitleEl.textContent = titleData.title;
+
+    const data = await guidelinesRes.json();
+    listEl.innerHTML = "";
+    data.guidelines.forEach((g) => {
+      const section = document.createElement("section");
+      section.className = "guideline";
+      const h2 = document.createElement("h2");
+      h2.textContent = g.title;
+      const p = document.createElement("p");
+      p.textContent = g.body;
+      section.appendChild(h2);
+      section.appendChild(p);
+      listEl.appendChild(section);
+    });
+  } catch (err) {
+    listEl.innerHTML = '<p id="status">Could not load guidelines — check that api/main.py is running.</p>';
+  }
+}
+
+loadGuidelines();
+</script>
+</body>
+</html>

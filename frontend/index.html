@@ -3,31 +3,25 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Compliance Assistant — Docket</title>
+<title>Compliance Assistant</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink-950:#10141B;
-    --ink-800:#1B212C;
-    --ink-700:#262E3B;
-    --ink-line:#38414F;
-    --paper:#ECE7DB;
-    --paper-line:#D8D2C1;
-    --gold:#B08D2B;
+    --bg:#FFFFFF;
+    --surface:#F4F3EF;
+    --surface-line:#E4E1D8;
+    --ink:#1B212C;
+    --ink-soft:#6B7280;
+    --ink-faint:#A2A8B3;
+    --gold:#A8802A;
     --gold-soft:#C9A845;
-    --text-hi:#F3F1EA;
-    --text-lo:#9AA3B2;
-    --ink-on-paper:#20242A;
-    --role-primary:#B08D2B;
-    --role-supporting:#4F7A63;
-    --role-conflict:#A65A3D;
   }
   *{box-sizing:border-box;}
   body{
     margin:0;
-    background:var(--ink-950);
-    color:var(--text-hi);
+    background:var(--bg);
+    color:var(--ink);
     font-family:'IBM Plex Sans', sans-serif;
     min-height:100vh;
     display:flex;
@@ -35,33 +29,56 @@
   }
   .app{
     width:100%;
-    max-width:760px;
+    max-width:720px;
     display:flex;
     flex-direction:column;
     min-height:100vh;
+    position:relative;
   }
   header{
-    padding:28px 20px 18px;
-    border-bottom:1px solid var(--ink-line);
-  }
-  header .eyebrow{
-    font-family:'IBM Plex Mono', monospace;
-    font-size:11px;
-    letter-spacing:.12em;
-    text-transform:uppercase;
-    color:var(--text-lo);
+    padding:18px 20px;
     display:flex;
+    align-items:center;
     justify-content:space-between;
+    border-bottom:1px solid var(--surface-line);
   }
-  header h1{
+  header .brand{
     font-family:'Fraunces', serif;
     font-weight:600;
-    font-size:26px;
-    margin:8px 0 0;
+    font-size:18px;
+    color:var(--ink);
   }
-  #thread-id{
-    color:var(--gold-soft);
+  header a.guidelines-link{
+    font-size:13px;
+    color:var(--ink-soft);
+    text-decoration:none;
+    border-bottom:1px solid transparent;
   }
+  header a.guidelines-link:hover{
+    color:var(--ink);
+    border-color:var(--ink-faint);
+  }
+
+  #empty-state{
+    position:absolute;
+    inset:0;
+    top:60px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:20px;
+    pointer-events:none;
+    transition:opacity .25s ease;
+  }
+  #empty-state p{
+    font-family:'Fraunces', serif;
+    font-size:24px;
+    font-weight:500;
+    color:var(--ink-soft);
+    max-width:420px;
+  }
+  #empty-state.hidden{ opacity:0; }
 
   #transcript{
     flex:1;
@@ -69,7 +86,7 @@
     padding:24px 20px 8px;
     display:flex;
     flex-direction:column;
-    gap:18px;
+    gap:20px;
   }
 
   .turn{
@@ -87,145 +104,118 @@
 
   .bubble{
     max-width:86%;
-    padding:12px 16px;
-    line-height:1.5;
+    line-height:1.55;
     font-size:15px;
     white-space:pre-wrap;
   }
   .turn.user .bubble{
-    background:var(--ink-700);
-    border:1px solid var(--ink-line);
-    border-radius:10px 10px 2px 10px;
-    color:var(--text-hi);
+    background:var(--surface);
+    border:1px solid var(--surface-line);
+    border-radius:14px 14px 3px 14px;
+    padding:10px 15px;
+    color:var(--ink);
   }
   .turn.assistant .bubble{
-    background:var(--paper);
-    color:var(--ink-on-paper);
-    border-radius:10px 10px 10px 2px;
-    position:relative;
-  }
-  .turn.assistant .bubble::before{
-    content:"";
-    position:absolute;
-    left:-9px;
-    top:0;
-    bottom:0;
-    width:3px;
-    background:var(--gold);
-    border-radius:2px;
+    padding:2px 0;
+    color:var(--ink);
   }
   .kind-tag{
     font-family:'IBM Plex Mono', monospace;
-    font-size:10px;
+    font-size:10.5px;
     letter-spacing:.08em;
     text-transform:uppercase;
-    color:var(--text-lo);
-    margin-bottom:6px;
+    color:var(--ink-faint);
+    margin-bottom:5px;
   }
-  .turn.assistant .kind-tag{ color:#8b8570; }
 
-  /* citation ledger */
-  .ledger{
+  .citations{
     max-width:86%;
-    margin-top:8px;
-    border-left:2px solid var(--ink-line);
-    padding-left:12px;
+    margin-top:10px;
     display:flex;
-    flex-direction:column;
-    gap:6px;
-  }
-  .citation{
-    background:var(--ink-800);
-    border:1px solid var(--ink-line);
-    border-radius:6px;
-    padding:8px 10px;
-  }
-  .citation summary{
-    cursor:pointer;
-    list-style:none;
-    display:flex;
-    align-items:center;
+    flex-wrap:wrap;
     gap:8px;
+  }
+  .citation-chip{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    background:var(--surface);
+    border:1px solid var(--surface-line);
+    border-radius:999px;
+    padding:5px 12px;
     font-family:'IBM Plex Mono', monospace;
-    font-size:12.5px;
+    font-size:12px;
   }
-  .citation summary::-webkit-details-marker{ display:none; }
-  .citation summary::before{
-    content:"›";
-    color:var(--text-lo);
-    transition:transform .15s ease;
-  }
-  .citation[open] summary::before{ transform:rotate(90deg); }
-  .citation .clause-ref{ color:var(--gold-soft); font-weight:500; }
-  .role-dot{
-    width:7px; height:7px; border-radius:50%;
-    display:inline-block;
-    flex-shrink:0;
-  }
-  .role-primary{ background:var(--role-primary); }
-  .role-supporting{ background:var(--role-supporting); }
-  .role-conflict{ background:var(--role-conflict); }
-  .citation a{
-    margin-left:auto;
-    color:var(--text-lo);
-    font-size:11px;
+  .citation-chip .ref{ color:var(--ink); font-weight:500; }
+  .citation-chip a{
+    color:var(--gold);
     text-decoration:none;
-    border-bottom:1px dotted var(--text-lo);
+    border-bottom:1px dotted var(--gold);
   }
-  .citation a:hover{ color:var(--gold-soft); border-color:var(--gold-soft); }
-  .citation .reasoning{
-    margin:8px 0 0;
-    padding-top:8px;
-    border-top:1px dashed var(--ink-line);
-    font-size:13px;
-    color:var(--text-lo);
-    line-height:1.5;
-  }
+  .citation-chip a:hover{ color:var(--gold-soft); }
 
   .conflicts-note{
     max-width:86%;
     margin-top:6px;
     font-size:12px;
-    color:var(--role-conflict);
+    color:#A65A3D;
     font-family:'IBM Plex Mono', monospace;
+  }
+
+  .thinking{
+    display:flex;
+    align-items:baseline;
+    gap:2px;
+    font-size:15px;
+    color:var(--ink-soft);
+  }
+  .thinking .thinking-word{ font-style:italic; }
+  .thinking .dots{ display:inline-flex; margin-left:2px; }
+  .thinking .dots span{
+    animation:wave 1.1s ease-in-out infinite;
+    display:inline-block;
+  }
+  .thinking .dots span:nth-child(1){ animation-delay:0s; }
+  .thinking .dots span:nth-child(2){ animation-delay:.15s; }
+  .thinking .dots span:nth-child(3){ animation-delay:.3s; }
+  @keyframes wave{
+    0%, 60%, 100%{ transform:translateY(0); opacity:.45; }
+    30%{ transform:translateY(-4px); opacity:1; }
   }
 
   form{
     display:flex;
     gap:10px;
     padding:16px 20px 22px;
-    border-top:1px solid var(--ink-line);
+    border-top:1px solid var(--surface-line);
   }
   textarea{
     flex:1;
     resize:none;
-    background:var(--ink-800);
-    border:1px solid var(--ink-line);
-    color:var(--text-hi);
-    border-radius:8px;
+    background:var(--surface);
+    border:1px solid var(--surface-line);
+    color:var(--ink);
+    border-radius:10px;
     padding:12px 14px;
     font-family:'IBM Plex Sans', sans-serif;
     font-size:14.5px;
     line-height:1.4;
     height:48px;
   }
-  textarea:focus{
-    outline:2px solid var(--gold);
-    outline-offset:1px;
-  }
+  textarea:focus{ outline:2px solid var(--gold); outline-offset:1px; }
   button{
-    background:var(--gold);
-    color:#1B1607;
+    background:var(--ink);
+    color:#FFFFFF;
     border:none;
-    border-radius:8px;
+    border-radius:10px;
     padding:0 20px;
     font-weight:600;
     font-size:14px;
     cursor:pointer;
   }
   button:disabled{
-    background:var(--ink-700);
-    color:var(--text-lo);
+    background:var(--surface-line);
+    color:var(--ink-faint);
     cursor:not-allowed;
   }
   button:focus-visible, textarea:focus-visible{ outline:2px solid var(--gold); }
@@ -233,24 +223,24 @@
   .status-line{
     font-family:'IBM Plex Mono', monospace;
     font-size:12px;
-    color:var(--text-lo);
+    color:#A65A3D;
     padding:0 20px 10px;
   }
 
   @media (prefers-reduced-motion: reduce){
     .turn{ animation:none; }
+    .thinking .dots span{ animation:none; opacity:1; }
   }
 </style>
 </head>
 <body>
 <div class="app">
   <header>
-    <div class="eyebrow">
-      <span>Compliance Assistant</span>
-      <span>Docket <span id="thread-id">—</span></span>
-    </div>
-    <h1>FINRA Rule Inquiry</h1>
+    <span class="brand">Compliance Assistant</span>
+    <a class="guidelines-link" href="guidelines.html">Guidelines</a>
   </header>
+
+  <div id="empty-state"><p id="greeting-text">Hello, I'm here to assist you.</p></div>
 
   <div id="transcript" aria-live="polite"></div>
   <div class="status-line" id="status-line"></div>
@@ -262,34 +252,41 @@
 </div>
 
 <script>
-// Point this at wherever api/main.py is running.
 const API_BASE = window.API_BASE || "http://localhost:8000";
 
 const transcriptEl = document.getElementById("transcript");
+const emptyStateEl = document.getElementById("empty-state");
+const greetingTextEl = document.getElementById("greeting-text");
 const formEl = document.getElementById("chat-form");
 const inputEl = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
 const statusEl = document.getElementById("status-line");
-const threadIdEl = document.getElementById("thread-id");
 
 let threadId = null;
-
-const ROLE_CLASS = {
-  primary: "role-primary",
-  supporting: "role-supporting",
-  conflict: "role-conflict",
-  conflicting: "role-conflict",
-};
+let thinkingWords = ["Thinking"];
+let thinkingIntervalMs = 1400;
 
 async function initSession() {
   try {
-    const res = await fetch(`${API_BASE}/api/session`, { method: "POST" });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const data = await res.json();
-    threadId = data.thread_id;
-    threadIdEl.textContent = threadId.slice(0, 8);
+    const [sessionRes, configRes] = await Promise.all([
+      fetch(`${API_BASE}/api/session`, { method: "POST" }),
+      fetch(`${API_BASE}/api/ui-config`),
+    ]);
+    if (!sessionRes.ok || !configRes.ok) throw new Error("bad response");
+
+    const session = await sessionRes.json();
+    threadId = session.thread_id;
+
+    const config = await configRes.json();
+    greetingTextEl.textContent = config.greeting_message;
+    if (config.thinking_words && config.thinking_words.length) {
+      thinkingWords = config.thinking_words;
+    }
+    if (config.thinking_word_interval_ms) {
+      thinkingIntervalMs = config.thinking_word_interval_ms;
+    }
   } catch (err) {
-    statusEl.textContent = "Could not reach the API to start a session — check that api/main.py is running.";
+    statusEl.textContent = "Could not reach the API — check that api/main.py is running.";
   }
 }
 
@@ -308,30 +305,18 @@ function addTurn(role, kindLabel, text) {
   return turn;
 }
 
-function addLedger(turnEl, trace, conflicts) {
+function addCitations(turnEl, trace, conflicts) {
   if (trace && trace.length) {
-    const ledger = document.createElement("div");
-    ledger.className = "ledger";
+    const wrap = document.createElement("div");
+    wrap.className = "citations";
     trace.forEach((c) => {
-      const details = document.createElement("details");
-      details.className = "citation";
-      const summary = document.createElement("summary");
-
-      const dot = document.createElement("span");
-      dot.className = `role-dot ${ROLE_CLASS[(c.relevance_role || "").toLowerCase()] || ""}`;
-      summary.appendChild(dot);
+      const chip = document.createElement("span");
+      chip.className = "citation-chip";
 
       const ref = document.createElement("span");
-      ref.className = "clause-ref";
+      ref.className = "ref";
       ref.textContent = c.clause_ref;
-      summary.appendChild(ref);
-
-      if (c.relevance_role) {
-        const roleText = document.createElement("span");
-        roleText.textContent = c.relevance_role;
-        roleText.style.color = "var(--text-lo)";
-        summary.appendChild(roleText);
-      }
+      chip.appendChild(ref);
 
       if (c.rule_url) {
         const link = document.createElement("a");
@@ -339,22 +324,11 @@ function addLedger(turnEl, trace, conflicts) {
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         link.textContent = "view rule ↗";
-        link.addEventListener("click", (e) => e.stopPropagation());
-        summary.appendChild(link);
+        chip.appendChild(link);
       }
-
-      details.appendChild(summary);
-
-      if (c.reasoning) {
-        const reasoning = document.createElement("p");
-        reasoning.className = "reasoning";
-        reasoning.textContent = c.reasoning;
-        details.appendChild(reasoning);
-      }
-
-      ledger.appendChild(details);
+      wrap.appendChild(chip);
     });
-    turnEl.appendChild(ledger);
+    turnEl.appendChild(wrap);
   }
 
   if (conflicts && conflicts.length) {
@@ -365,6 +339,44 @@ function addLedger(turnEl, trace, conflicts) {
   }
 }
 
+let thinkingTimer = null;
+
+function startThinkingIndicator() {
+  const turn = document.createElement("div");
+  turn.className = "turn assistant";
+  turn.id = "thinking-turn";
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble thinking";
+
+  const wordEl = document.createElement("span");
+  wordEl.className = "thinking-word";
+
+  const dots = document.createElement("span");
+  dots.className = "dots";
+  dots.innerHTML = "<span>.</span><span>.</span><span>.</span>";
+
+  bubble.appendChild(wordEl);
+  bubble.appendChild(dots);
+  turn.appendChild(bubble);
+  transcriptEl.appendChild(turn);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+
+  let i = Math.floor(Math.random() * thinkingWords.length);
+  wordEl.textContent = thinkingWords[i];
+  thinkingTimer = setInterval(() => {
+    i = (i + 1) % thinkingWords.length;
+    wordEl.textContent = thinkingWords[i];
+  }, thinkingIntervalMs);
+}
+
+function stopThinkingIndicator() {
+  if (thinkingTimer) clearInterval(thinkingTimer);
+  thinkingTimer = null;
+  const turn = document.getElementById("thinking-turn");
+  if (turn) turn.remove();
+}
+
 const KIND_LABELS = {
   answer: "Answer",
   clarification: "Clarifying question",
@@ -373,11 +385,14 @@ const KIND_LABELS = {
 };
 
 async function sendMessage(message) {
+  emptyStateEl.classList.add("hidden");
+
   addTurn("user", "You", message);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
 
   sendBtn.disabled = true;
-  statusEl.textContent = "Thinking…";
+  statusEl.textContent = "";
+  startThinkingIndicator();
 
   try {
     const res = await fetch(`${API_BASE}/api/chat`, {
@@ -389,14 +404,14 @@ async function sendMessage(message) {
     const data = await res.json();
 
     threadId = data.thread_id;
-    threadIdEl.textContent = threadId.slice(0, 8);
 
+    stopThinkingIndicator();
     const turnEl = addTurn("assistant", KIND_LABELS[data.type] || data.type, data.content);
     if (data.type === "answer") {
-      addLedger(turnEl, data.trace, data.conflicts);
+      addCitations(turnEl, data.trace, data.conflicts);
     }
-    statusEl.textContent = "";
   } catch (err) {
+    stopThinkingIndicator();
     statusEl.textContent = "The assistant didn't respond — check that api/main.py is running and reachable.";
   } finally {
     sendBtn.disabled = false;
