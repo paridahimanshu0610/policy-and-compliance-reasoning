@@ -29,7 +29,7 @@ HTML_DIR = DATA_DIR / "FINRA_Rules"
 # Eval paths
 # ---------------------------------------------------------------------------
 EVAL_DATA_DIR = DATA_DIR / "evals"
-EVAL_OUTPUT_DIR = DATA_DIR / "eval_results" / "agent"
+EVAL_OUTPUT_DIR = DATA_DIR / "eval_results"
 
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
 COLLECTION_NAME = "finra_clauses"

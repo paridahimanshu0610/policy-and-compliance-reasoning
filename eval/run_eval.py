@@ -21,8 +21,8 @@ For every (question, eval_case) pair discovered by eval/loader.py:
      (eval/metrics.py), and coverage / must_mention / groundedness /
      non-gold-relevance / quality via judge calls (eval/judge.py).
   4. Write one JSON record per question to
-     {EVAL_OUTPUT_DIR}/{run_id}/records.jsonl, and a rolled-up summary to
-     {EVAL_OUTPUT_DIR}/{run_id}/summary.json (eval/aggregate.py).
+     {EVAL_OUTPUT_DIR}/agent/{run_id}/records.jsonl, and a rolled-up summary to
+     {EVAL_OUTPUT_DIR}/agent/{run_id}/summary.json (eval/aggregate.py).
 """
 
 import argparse
@@ -385,7 +385,7 @@ def main():
         return
 
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_dir = EVAL_OUTPUT_DIR / run_id
+    run_dir = EVAL_OUTPUT_DIR / "agent" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Running {len(items)} eval items -> {run_dir}")
