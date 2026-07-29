@@ -340,16 +340,65 @@ def compute_record(item: EvalItem, run: dict) -> dict:
 # CLI
 # ---------------------------------------------------------------------------
 
+MAX_CONSECUTIVE_ERRORS = 3  # stop the run once this many "terminated_via": "error" records happen in a row
+
+
+def _load_existing_records(records_path: Path) -> list[dict]:
+    if not records_path.exists():
+        return []
+    records = []
+    with open(records_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return records
+
+
+def _trim_trailing_error_run(records: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Drops a trailing run of consecutive terminated_via=="error" records --
+    these are exactly the records that caused a previous run to stop (see
+    MAX_CONSECUTIVE_ERRORS below), so they need to be re-attempted on resume.
+    Any earlier, non-trailing error record (a one-off failure sandwiched
+    between good records) is left alone -- only the contiguous run at the
+    very end of the file is removed."""
+    trimmed = list(records)
+    dropped = []
+    while trimmed and trimmed[-1].get("terminated_via") == "error":
+        dropped.append(trimmed.pop())
+    dropped.reverse()  # back into original order, for logging
+    return trimmed, dropped
+
+
 def run(items: list[EvalItem], run_dir: Path) -> list[dict]:
     records_path = run_dir / "records.jsonl"
-    records = []
-    with open(records_path, "w", encoding="utf-8") as f:
-        for i, item in enumerate(items, 1):
-            print(f"[{i}/{len(items)}] {item.item_id} ...", flush=True)
+
+    records, dropped = _trim_trailing_error_run(_load_existing_records(records_path))
+    if dropped:
+        dropped_ids = [r.get("item_id") for r in dropped]
+        print(f"Resuming: dropping {len(dropped)} trailing errored record(s) "
+              f"to re-attempt them: {dropped_ids}", flush=True)
+        # Rewrite the file without the trailing error records so the retried
+        # items don't end up duplicated in records.jsonl.
+        with open(records_path, "w", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+
+    done_ids = {r["item_id"] for r in records if "item_id" in r}
+    remaining_items = [item for item in items if item.item_id not in done_ids]
+    if done_ids:
+        print(f"Resuming: {len(done_ids)}/{len(items)} item(s) already recorded, "
+              f"{len(remaining_items)} remaining.", flush=True)
+
+    consecutive_errors = 0
+    with open(records_path, "a", encoding="utf-8") as f:
+        for i, item in enumerate(remaining_items, 1):
+            print(f"[{i}/{len(remaining_items)}] {item.item_id} ...", flush=True)
             t0 = time.perf_counter()
             try:
                 conv = drive_conversation(item)
                 record = compute_record(item, conv)
+                consecutive_errors = 0
             except Exception as exc:  # noqa: BLE001 -- eval must survive one bad item
                 record = {
                     "item_id": item.item_id,
@@ -359,10 +408,19 @@ def run(items: list[EvalItem], run_dir: Path) -> list[dict]:
                     "terminated_via": "error",
                     "error": repr(exc),
                 }
+                consecutive_errors += 1
             record["wall_clock_seconds"] = round(time.perf_counter() - t0, 2)
             f.write(json.dumps(record) + "\n")
             f.flush()
             records.append(record)
+
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                print(f"Stopping: {MAX_CONSECUTIVE_ERRORS} consecutive errored items "
+                      f"(last item_id={item.item_id}). This usually means something "
+                      f"systemic (e.g. API token limit) rather than a one-off failure. "
+                      f"Re-run with the same --run-id to resume.", flush=True)
+                break
+
     return records
 
 
