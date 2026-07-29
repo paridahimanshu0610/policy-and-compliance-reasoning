@@ -122,14 +122,14 @@ def intake_node(state: AgentState) -> dict:
         context = (
             f"Situation summary so far: {previous_summary}\n\n"
             f"Facts extracted last turn (continuity aid only -- see rule 6 under CRITICAL RULES): {known_so_far}\n\n"
-            f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet):\n{previous_gaps}\n\n"
+            f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet or the AI's last question was not targetted at any field):\n{previous_gaps}\n\n"
             f"Latest interaction between system and user:\nAI: {latest_ai_message.content}\nUser: {latest_user_query}\n"
         )
     else:
         context = (
             f"Situation summary so far: {previous_summary}\n\n"
             f"Facts extracted last turn (continuity aid only -- see rule 6 under CRITICAL RULES): {known_so_far}\n\n"
-            f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet):\n{previous_gaps}\n\n"
+            f"Field(s) the AI's last question targeted (empty if no clarifying question has been asked yet or the AI's last question was not targetted at any field):\n{previous_gaps}\n\n"
             f"Latest interaction: {latest_user_query}"
         )
 
