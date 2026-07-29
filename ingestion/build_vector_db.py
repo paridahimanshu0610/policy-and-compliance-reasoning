@@ -557,4 +557,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    # retrieval_eval(model_name="voyage-law-2")
