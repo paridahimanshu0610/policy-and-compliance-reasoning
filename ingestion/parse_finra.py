@@ -22,7 +22,7 @@ from llama_cpp import Llama
 import uuid
 from collections import Counter
 from typing import Any, IO
-from config.settings import TARGET_RULES, PARSED_CHECKPOINT, DATA_DIR, MODEL_CONFIGS, HTML_DIR, SERIES_MAP, INFERENCE_BACKEND, TAMU_CONFIG
+from config.settings import TARGET_RULES, PARSED_CHECKPOINT, DATA_DIR, NORMALIZED_CHECKPOINT, MODEL_CONFIGS, HTML_DIR, SERIES_MAP, INFERENCE_BACKEND, TAMU_CONFIG
 from config.prompts  import CLAUSE_NORMALISATION_PROMPT
 
 
@@ -1034,7 +1034,7 @@ def saving_aggregated_results(models: list[str]):
                 model_results[model_name] = [json.loads(line) for line in f]
                 model_results[model_name] = {temp["clause_ref"] : temp for temp in model_results[model_name]}
 
-    output_path = DATA_DIR + "normalized_aggregated_clause.jsonl"
+    output_path = NORMALIZED_CHECKPOINT
     other_agg_fields = ['id','document','clause_ref','parent_clause','clause_heading','merged_up_to','rule_id','rule_name','regulator']
 
     all_clause_refs = model_results[models[0]].keys() 
