@@ -1,456 +1,141 @@
-# FINRA Compliance Reasoning System
+# FINRA Compliance Reasoning Agent
 
-An end-to-end compliance decision-support system for FINRA regulations. Scrapes live FINRA rule pages, parses them into structured clause-level documents, stores them in a vector database, and serves hybrid semantic and metadata-filtered retrieval through both a conversational web interface and an MCP server consumable by any MCP-compatible client.
+An AI agent that helps broker-dealers and other FINRA-regulated professionals figure out which FINRA clauses apply to their specific situation. Given a plain-language description of a scenario, it clarifies ambiguous or missing facts, retrieves the relevant clauses from a purpose-built knowledge base of ~1,300 FINRA clauses, reasons over them with explicit, auditable logic, and returns a structured answer — with the option to hand off to a human compliance officer when the situation warrants it. The system spans the full LLM engineering stack: a deterministic + LLM-hybrid data ingestion pipeline, a stateful multi-turn agent built on LangGraph, a custom evaluation harness with simulated users, and an MCP server for integration into other tools.
+
+## Beyond a Standard RAG Pipeline
+
+1. **Retrieval-guided clarification.** The agent doesn't ask clarifying questions off a static checklist. It retrieves candidate clauses first, based on the situation as understood so far, and only asks a follow-up question if a specific retrieved clause depends on a fact that hasn't been given yet. Every question is grounded in real, retrieved rule text — retrieval drives the conversation, not just the final answer.
+2. **Explainable reasoning.** Every clause in the final answer is labeled with its role (governing rule, exception, condition, definition, etc.) and comes with a reasoning trace tying it to the user's specific facts, plus any conflicts and how they were resolved. The answer is auditable, not just generated — which matters for a compliance tool.
+3. **A purpose-built, reverse-engineered evaluation dataset.** Rather than hand-writing test questions, every evaluation case is generated backward from the actual FINRA clause text — an LLM is given real clauses first and asked to construct a realistic situation for which those specific clauses are the correct and complete answer. This is a custom evaluation harness written from scratch for this use case, not a ready-made evaluation library — including the metrics, the LLM-as-judge scoring, and a **simulated user** that role-plays the person asking, holding back or revealing facts according to a difficulty tier. The full pipeline — multi-turn conversation, scoring across retrieval/reasoning/hallucination/quality/agentic-behavior, and reporting — is **fully automated**, with no manual grading step.
 
 ---
 
 ## Table of Contents
-
-- [Problem](#problem)
-- [Solution Overview](#solution-overview)
-- [Architecture](#architecture)
-- [Components](#components)
-  - [Data Ingestion Pipeline](#1-data-ingestion-pipeline)
-  - [Knowledge Base](#2-knowledge-base)
-  - [Intent Pipeline](#3-intent-pipeline)
-  - [Retrieval Layer](#4-retrieval-layer)
-  - [Compliance Reasoning](#5-compliance-reasoning)
-  - [Web Interface](#6-web-interface)
-  - [MCP Server](#7-mcp-server)
-- [Project Structure](#project-structure)
-- [Setup and Installation](#setup-and-installation)
-- [Usage](#usage)
-  - [Build the Knowledge Base](#build-the-knowledge-base)
-  - [Run the Web Chatbot](#run-the-web-chatbot)
-  - [Run the MCP Server](#run-the-mcp-server)
-  - [Connect to Claude Desktop](#connect-to-claude-desktop)
-- [FINRA Rules Covered](#finra-rules-covered)
-- [Design Decisions](#design-decisions)
-- [Limitations](#limitations)
+1. [Data Parsing and Ingestion](#data-parsing-and-ingestion)
+2. [The Agentic Loop](#the-agentic-loop)
+3. [Evaluation Harness](#evaluation-harness)
+4. [MCP Server](#mcp-server)
 
 ---
 
-## Problem
+## Data Parsing and Ingestion
 
-Financial institutions operating under FINRA regulations face a persistent compliance challenge: determining whether a specific activity triggers a regulatory obligation requires reasoning across multiple rule clauses, conditions, and exceptions scattered across long, unstructured regulatory documents.
+Ingestion runs in four stages: **parse → normalize → embed → index**.
 
-Employees — particularly at smaller broker-dealers — often need answers to questions such as:
+**Parsing.** FINRA rule HTML is cleaned (structural tags kept, everything else stripped before parsing to avoid spurious line breaks from BeautifulSoup) and then split into a nested clause hierarchy — `(a)`, `(a)(1)(A)`, `.01` supplementary-material markers, etc. This chunking is fully **deterministic**: a small parser tracks marker sequences (numeric, alpha, roman, dot-style) and infers each clause's `clause_ref` and `parent_clause` from the marker grammar itself, not an LLM.
 
-- Can a registered representative maintain a personal brokerage account at another firm without notifying us?
-- Does a branch office inspection require a written report, and who must sign it?
-- Under what conditions can an associated person borrow money from a customer?
-- What recordkeeping obligations apply to a discretionary account?
+**Merging fragments upward.** Many leaf clauses are sentence fragments or list items that don't stand alone (e.g. ending in `; and`, or under 20 words). Each such clause is deterministically merged with its ancestor chain until a self-complete node is found, producing a `merged_clause` field alongside the original `raw_text`. This keeps the original clause boundaries intact for precise retrieval while ensuring the *embedded* text carries enough context to be understood on its own.
 
-Traditional approaches to answering these questions are inadequate:
+**Normalization.** Each clause is passed to an LLM with a fixed schema of tags — who the obligation falls on (`obligated_actor`), what it's about (`regulated_subject`, `activity_type`), which firm types it applies to, and a handful of booleans/metadata (`involves_customer`, `has_financial_threshold`, `frequency`, etc.), all constrained to enumerated values rather than free text. Because a single model's output isn't fully deterministic across runs, **four different LLMs** (o3, Claude Opus 4.7, GPT-5, Gemini 2.5 Pro) tag every clause independently, and the final tag set is decided by **majority vote** across the four — reducing the risk of any one model's idiosyncrasy defining a clause's tags.
 
-**Document search** retrieves text passages but cannot evaluate conditions, identify the obligated party, or determine whether an exception applies. Finding the right paragraph in a 40-page rule document is not the same as understanding what the rule requires.
+**Embedding.** Four embedding models (2 closed-source API, 2 open-source local) were benchmarked on retrieval quality (MAP, recall@k) against hand-labeled test situations. `voyage-law-2` and a local `Octen-Embedding-8B` model performed best and comparably; `voyage-law-2` was chosen for production since it's a fast hosted API rather than requiring local GPU inference. The merged, context-complete text is what gets embedded.
 
-**Simple RAG systems** retrieve semantically similar text but treat all retrieved passages equally. A clause that defines a term and a clause that imposes an obligation look similar to an embedding model but carry entirely different legal weight.
-
-**Manual lookup** is slow, error-prone, and relies on the individual's familiarity with the rulebook — a significant risk in firms with high staff turnover or limited compliance resources.
-
-The result is that employees either spend excessive time researching routine questions, or make compliance decisions based on incomplete understanding of the applicable rules.
+**Indexing.** Clauses are indexed in **Qdrant**, storing both a dense vector (from the merged/context-rich text) and a BM25 sparse vector (deliberately from the *original*, unmerged text — using merged text for sparse search would make sibling clauses with shared ancestors compete on near-duplicate lexical content). All normalized tags are stored as filterable, indexed payload fields, so retrieval can combine semantic or keyword search with structured filters (e.g. "clauses about supervision that involve a customer and apply to carrying firms"). Qdrant was chosen for native hybrid dense+sparse support, pre-filtering that doesn't hurt recall, and a low-friction path from ~1,300 clauses today to a much larger index later.
 
 ---
 
-## Solution Overview
+## The Agentic Loop
 
-This system addresses the problem through four interlocking components:
+The core of this assistant is a stateful, multi-turn conversation, not a single-shot Q&A — figuring out which FINRA clause applies often takes several exchanges (clarifying questions, follow-up searches, occasional handoff to a human). **LangGraph** was chosen to model this as an explicit state machine: one shared state object flows through every step, persists across turns via a checkpointer, and can pause mid-conversation (e.g. to ask the user a question) and resume exactly where it left off.
 
-1. **Structured knowledge base** — FINRA rules are not stored as raw text. They are parsed at the clause level, with each clause normalized into a structured document containing LLM-extracted metadata fields including the regulated activity, obligated actor, regulated subject, boolean flags for customer and third-party involvement, and topic tags. This transforms unstructured regulatory text into a queryable, filterable dataset.
+![Agentic loop graph](assets/agentic_loop_graph.png)
 
-2. **Intent-driven retrieval** — rather than issuing a raw keyword search, the system conducts a multi-turn clarification conversation with the user to identify five key fields about their situation. This structured intent drives a hybrid retrieval strategy: ChromaDB metadata filters narrow the candidate clause set, and semantic similarity ranking within that set surfaces the most relevant clauses.
-
-3. **Clause-backed reasoning** — a local LLM reads the retrieved clauses and produces a structured compliance analysis citing specific clause references, not general knowledge. The model cannot cite rules that were not retrieved, which grounds the output in the actual regulatory text.
-
-4. **MCP server** — the knowledge base and retrieval capability are exposed as a Model Context Protocol server, enabling any MCP-compatible client — Claude Desktop, Cursor, or a custom agent — to perform structured FINRA clause retrieval without knowledge of the underlying data model.
-
----
-
-## Architecture
+### High-level flow
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        DATA INGESTION                               │
-│                                                                     │
-│  FINRA Rule Pages  →  Scraper  →  Clause Parser  →  LLM            │
-│  (live HTML)           (BS4)      (hierarchical)    Normaliser      │
-│                                                         │           │
-│                                                         ▼           │
-│                                                   ChromaDB          │
-│                                                  (187 clauses)      │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                ┌───────────────┴───────────────┐
-                │                               │
-                ▼                               ▼
-┌───────────────────────────┐   ┌───────────────────────────────────┐
-│     WEB CHATBOT           │   │         MCP SERVER                │
-│                           │   │                                   │
-│  User question            │   │  retrieve_clauses (tool)          │
-│       │                   │   │  extract_intent   (tool)          │
-│       ▼                   │   │  finra://rules/index (resource)   │
-│  Clarification agent      │   │  finra://rules/{id}  (resource)   │
-│  (local LLM, multi-turn)  │   │  finra://clauses/{ref}(resource)  │
-│       │                   │   │  clarification_prompt  (prompt)   │
-│       ▼                   │   │  compliance_reasoning  (prompt)   │
-│  Intent extraction        │   │                                   │
-│       │                   │   │  Consumed by: Claude Desktop,     │
-│       ▼                   │   │  Cursor, custom agents            │
-│  ChromaDB retrieval       │   └───────────────────────────────────┘
-│  (filter + semantic)      │
-│       │                   │
-│       ▼                   │
-│  Compliance reasoning     │
-│  (local LLM)              │
-│       │                   │
-│       ▼                   │
-│  Cited compliance answer  │
-│  + follow-up conversation │
-└───────────────────────────┘
+mask_pii → scope_gate ─┬─→ human-in-the-loop → END   (user asked for a human)
+                        ├─→ out_of_scope → END        (off-topic message)
+                        ├─→ explain → END              (question about the conversation itself)
+                        └─→ intake → retrieve → clarification check ─┬─→ clarify → END
+                                                                       ├─→ human-in-the-loop → END  (asked too many questions already)
+                                                                       └─→ expand → reason ⇄ retrieve (loop until confident)
+                                                                                       │
+                                                                                       ▼
+                                                                                 synthesize → END (or → human-in-the-loop, if reasoning ran too long)
 ```
 
----
+### What each stage does, and why it exists
 
-## Components
+- **Mask PII** — strips PII (emails, phone numbers, SSNs, account numbers) out of the message before it ever reaches an LLM, and restores it only when showing an answer to the user or emailing a human agent. A basic input safeguard for a compliance tool.
+- **Scope gate** — a fast check that runs before anything else: is this actually a FINRA compliance question, is the user asking for a human, or are they asking about something already discussed? Keeps off-topic chatter and meta-questions from ever entering the heavier reasoning pipeline.
+- **Intake** — turns what the user said into structured facts (using the same vocabulary the clause database is tagged with), keeps a running plain-language summary of the whole situation, and tracks which fields the user has explicitly said they're unsure about — so the agent never re-asks something it's already been told "I don't know" to.
+- **Retrieve** — always re-runs a fresh search against the *current* situation summary and known structured facts (as filters). Never cached across turns, because the summary itself updates every turn as new facts come in — so what's actually relevant can shift turn to turn.
+- **Clarification / ambiguity check — the core differentiator.** Rather than checking for empty form fields, this step reads the actual clauses just retrieved and asks two distinct questions: (1) *Ambiguity* — could the user's underlying question itself mean more than one thing, each pointing at a different set of clauses? (2) *Gap* — do these specific retrieved clauses depend on a fact that isn't known yet (e.g. a clause requires a dollar threshold and none has been given; the clause outcome depends on retail vs. institutional customer, or on whether a third party is involved)? Only gaps that would actually change which clause applies trigger a question — nothing is asked just because a field happens to be empty.
+- **Clarify** — asks the single most important open question (justified by the retrieval above) and waits for the user's reply.
+- **Expand → Reason** — candidate clauses are merged into a working "clause graph," then handed to the reasoning step. The reasoner can pull additional context with its own tools (dense semantic search, exact BM25 keyword search, or direct clause/parent/child lookups) and, for every clause it judges relevant, assigns a role (is it the governing rule, an exception, a condition, a definition...) and writes a reasoning trace tying it to the user's specific facts. It flags any conflicts between clauses and how they're resolved, and — if it isn't yet confident the clause set is complete — loops back to retrieve instead of forcing an answer.
+- **Synthesize** — once reasoning is confident, writes the final answer using only the clauses judged relevant, citing each by its exact clause reference, preserving the structure of roles (core obligation first, then exceptions/conditions/safe harbors), surfacing any unresolved conflicts plainly, and closing with any caveats the reasoning implies.
+- **Human-in-the-loop** — a safety net reached three ways: the user directly asks for a person (a simple hand-off), or the system itself recognizes it's hit a limit — too many clarifying questions without resolving things, or too many reasoning cycles without reaching confidence — and hands the conversation to a compliance agent rather than guessing. Asks consent, collects contact details, and emails a summary to the compliance team.
 
-### 1. Data Ingestion Pipeline
+### Safety caps
 
-**File:** `ingestion/parse_finra.py`, `ingestion/build_knowledge_base.py`
+Two limits in `config/settings.py` keep the agent from getting stuck:
 
-The ingestion pipeline runs once to build the knowledge base and supports resumption if interrupted.
+- **`MAX_CLARIFICATION_TURNS`** — the most clarifying questions the agent will ask in one conversation before handing off to a human instead of continuing to interrogate the user.
+- **`MAX_REASONING_CYCLES`** — the most retrieve → reason loops allowed in a single turn. If hit, the agent still gives its best-effort answer, but also loops in a human, so a stuck reasoning loop degrades gracefully rather than failing silently or spinning indefinitely.
 
-**Scraping** — rule pages are fetched from `finra.org` using BeautifulSoup. The scraper targets the rule body content specifically, removes footnote tables, and flattens bold/strong tags into marked text nodes before extraction. A one-second delay between requests is maintained as a courtesy.
-
-**Clause parsing** — raw rule text is split into clause-level units using a custom hierarchical parser that understands FINRA's nested numbering scheme. Parenthetical markers `(a)`, `(a)(1)`, `(a)(1)(A)` and supplementary material decimal markers `.01`, `.02` are both handled. Each clause is assigned:
-- A structured `clause_ref` identifier (e.g. `FINRA-3110(c)(3)(C)`)
-- A `parent_clause` reference linking it to its governing obligation
-- An optional `clause_heading` extracted from bold text
-
-**Fragment merging** — clauses that cannot stand alone — list items ending with semicolons, sentence continuations, or clauses shorter than 20 words — are merged upward through the ancestor chain until a self-contained obligation is found. The merged text is what gets embedded into ChromaDB. This is critical: a clause reading "unless otherwise provided" is meaningless in isolation but meaningful when merged with its parent obligation.
-
-**LLM normalisation** — each clause is sent to a local LLM with a detailed normalisation prompt that extracts structured metadata fields:
-
-| Field | Type | Example |
-|---|---|---|
-| `category` | string | `"supervision"` |
-| `activity_type` | string | `"inspection"` |
-| `obligated_actor` | string | `"member"` |
-| `regulated_subject` | string | `"branch_office"` |
-| `involves_customer` | bool | `false` |
-| `involves_third_party` | bool | `false` |
-| `has_financial_threshold` | bool | `false` |
-| `documentation_required` | bool | `true` |
-| `frequency` | string | `"annual"` |
-| `reporting_recipient` | string | `null` |
-| `subject_matter` | list | `["annual_inspection", "OSJ"]` |
-| `keywords` | list | `["inspect at least annually"]` |
-
-Normalisation runs incrementally — each completed clause is written to `data/normalized_documents.jsonl` immediately. If the process is killed, re-running resumes from where it stopped.
-
-**ChromaDB ingestion** — assembled documents are written to a persistent ChromaDB collection with `all-MiniLM-L6-v2` sentence-transformer embeddings and cosine similarity. Ingestion is idempotent — re-running skips already-present document IDs.
+Together, these guarantee every conversation converges — to an answer, a clarifying question, or a human handoff — rather than looping indefinitely.
 
 ---
 
-### 2. Knowledge Base
+## Evaluation Harness
 
-**Location:** `data/chromadb/`
+**The core differentiator of this evaluation is the data itself.** Instead of hand-written test questions, every eval case is *reverse-engineered from the actual FINRA clauses*: an LLM is given the real regulatory text first and asked to construct a realistic user situation for which those specific clauses are the correct and complete answer. This guarantees every test case is grounded in real rules rather than invented scenarios that only loosely map to them. On top of that, each case is tested at three difficulty levels that control how much of the situation the user discloses upfront — because in practice, users don't hide relevant details maliciously, they just don't know which facts are legally significant until asked.
 
-The knowledge base contains **187 clauses** across 7 FINRA rules stored as normalized documents. Each document has:
-- **Embedding text** — the merged clause text (self-contained, includes governing obligation context)
-- **Metadata** — all normalized fields listed above, usable as hard filters in ChromaDB queries
-- **Provenance** — `rule_id`, `rule_name`, `clause_ref`, `parent_clause`, `merged_up_to`
+**Evaluation data generation (Claude Sonnet 5).** Generation happens in two stages. First, situations and ground-truth cases are built for **12 distinct situation archetypes** — each targeting a different reasoning capability the agent needs, from the simple (a single self-contained clause) to the hard (conflicting clauses that must be flagged, cross-rule dependencies, entity-specific answers, questions with no applicable clause at all, genuinely ambiguous queries). Second, for every case, three query variants are generated:
 
----
+- **Easy** — the query contains enough detail to retrieve the correct clause with no follow-up needed.
+- **Medium** — the query states the general concern but naturally omits 1–2 facts the correct answer depends on.
+- **Hard** — the query is vague and high-level, as a non-expert would actually ask it, omitting 3+ load-bearing details.
 
-### 3. Intent Pipeline
+This difficulty ladder is the point: it evaluates not just whether the agent *knows* the rule, but whether it can recognize what it doesn't yet know and ask for it — a materially harder and more realistic test than single-shot retrieval accuracy alone.
 
-**File:** `pipeline/intent_pipeline.py`
+**The 12 situations tested:** Single Clause Retrieval · Multiple Clauses (Same Role) · Multiple Clauses (Distinct Roles) · Hierarchical Dependency · Conditional Trigger · Rule with Safe Harbor · Conflicting Clauses · Cross-Rule Dependency · No Applicable Clause Within Scope · Numeric Threshold / Table Lookup · Ambiguous Query · Entity-Specific Clause.
 
-The intent pipeline converts a free-form user question into a structured query object through two stages.
+**How the harness runs.** For each question, a simulated user (grounded strictly in the ground-truth situation, never inventing facts it wasn't given) converses with the agent until it produces a final answer, exhausts its clarification budget, or escalates to a human. The full conversation, retrieved clauses, and final answer are then scored across:
 
-**Stage 1 — Clarification agent**
+- **Retrieval** — recall against ground-truth clauses (deterministic)
+- **Reasoning** — does the agent's reasoning match the expert rationale, does the final answer actually convey every required point (LLM-judged)
+- **Hallucination** — are cited clauses real (deterministic, zero-tolerance), is the agent's reasoning about each clause faithful to its actual text (LLM-judged)
+- **Answer quality** — responsiveness and structural clarity (LLM-judged, 1–5 scale)
+- **Agentic behavior** — clarification turns, reasoning cycles, tool calls, handoff rate
+- **Token usage** — per question and per underlying model, for cost tracking
 
-A multi-turn conversational agent that gathers five key fields before retrieval:
+**Avoiding self-bias.** The agent reasons using one model; the LLM-judge and the simulated user each run on a *different* model entirely. This is deliberate — grading a model's output with that same model risks it favoring its own reasoning style and phrasing over an honest, independent evaluation.
 
-1. `activity` — what situation is the user asking about
-2. `actor` — who is involved and in what role
-3. `involves_customer` — whether a customer or their account is affected
-4. `involves_third_party` — whether an outside party is involved
-5. `has_financial_threshold` — whether a specific financial figure is relevant
+**Baseline.** A retrieval-only baseline (no agent, no reasoning, no judge) throws each query straight at the retriever under dense/sparse search and raw-query/expert-summary inputs. It isolates whether retrieval quality or query underspecification is the bottleneck, and gives the full agentic system a floor to actually beat — if the agent isn't outperforming naive retrieval on the same clauses, its added complexity isn't justified.
 
-The agent asks one question at a time in strict priority order, stopping at the first missing field. Fields 3, 4, and 5 are marked CLEAR after any user response — including expressions of uncertainty — so the conversation does not loop. When all fields are clear, the agent produces a formal third-person situation summary and signals `[READY_TO_STRUCTURE]`.
-
-The prompt underwent significant iteration to address specific failure modes including wrong question priority, field assessment leaking into visible output, and repeated questions on uncertain answers.
-
-**Stage 2 — Intent extraction**
-
-The situation summary is passed to a single-turn LLM call with a structured extraction prompt that maps the situation to the ChromaDB metadata schema. The output is a JSON object with fields including `activity_type`, `category`, `obligated_actor`, `regulated_subject`, and boolean flags. This JSON drives the retrieval filter.
+Every run produces a per-question JSONL log and a rolled-up JSON summary (per-situation and overall), so results can be audited at both the individual-question and aggregate level.
 
 ---
 
-### 4. Retrieval Layer
+## MCP Server
 
-**File:** `pipeline/retrieval.py`
+In addition to the LangGraph-based chat agent (`agent/graph.py`), this project exposes its FINRA clause knowledge base and reasoning pipeline as an [MCP](https://modelcontextprotocol.io) server, so any MCP-compatible client (Claude Desktop, an IDE assistant, another agent) can query it directly.
 
-Retrieval uses a two-stage strategy:
+### What it offers
 
-**Stage 1 — Metadata filtering** — a `where` filter is constructed from the intent JSON. Only fields whose values are known with high confidence are used as hard filters. Null values and `false` boolean values are never filtered on — a missing filter widens the search safely, while a wrong filter silently excludes correct clauses.
+**Tools** — actions the client can invoke:
 
-**Stage 2 — Semantic similarity** — within the filtered candidate set, ChromaDB ranks documents by cosine similarity against the situation summary. The situation summary — not keyword fragments — is used as the query string, which matches the natural language embedding space of the stored merged clause texts.
-
-**Fallback** — if the filtered search returns no results, the system automatically retries with no filter and pure semantic search. This prevents the retrieval layer from returning nothing due to imperfect upstream intent extraction.
-
-**Post-filtering** — `applies_to_firm_type` is applied as a soft post-filter: non-matching documents are moved to the end of results rather than excluded, preserving completeness.
-
----
-
-### 5. Compliance Reasoning
-
-**File:** `pipeline/compliance_reasoning.py`
-
-A final LLM call takes the situation summary and retrieved clauses and produces a structured compliance analysis with four mandatory sections:
-
-- **DETERMINATION** — a 2-3 sentence statement of whether the situation triggers an obligation
-- **APPLICABLE CLAUSES** — a list of directly applicable clause references with one-sentence explanations
-- **REASONING** — step-by-step reasoning from retrieved clauses to determination
-- **CAVEATS** — limitations, conditions, and situations where additional rules may apply
-
-Clause texts are truncated at 600 characters each in the prompt to preserve context budget while retaining the governing obligation. The model is explicitly instructed not to cite rules that are not in the retrieved set.
-
-**Follow-up reasoning** uses a separate prompt that anchors subsequent questions to the already-retrieved clauses and initial analysis. No new retrieval is performed during follow-up turns.
-
----
-
-### 6. Web Interface
-
-**Files:** `web/server.py`, `web/static/index.html`
-
-A FastAPI backend with a single-page HTML chat UI running entirely on localhost.
-
-**Session lifecycle:**
-
-```
-clarifying  →  followup  →  ended
-```
-
-- `clarifying` — user is answering clarification questions
-- `followup` — compliance answer delivered, follow-up questions accepted
-- `ended` — context limit reached, input disabled
-
-**Key design decisions:**
-- All LLM calls are dispatched through a `ThreadPoolExecutor` with `max_workers=1` so the async event loop is never blocked. The worker count is fixed at 1 because llama_cpp is not thread-safe with a shared model instance.
-- Context usage is tracked per-phase. Clarification tokens and follow-up tokens are counted in separate counters because each phase constructs entirely independent message lists — the follow-up LLM call has no memory of the clarification conversation.
-- A context meter displays remaining context as a percentage, with a warning at 20% and hard disable at 5%.
-
-**Run:**
-```bash
-python -m web.server --model qwen        # default
-python -m web.server --model llama
-python -m web.server --model qwen --top-k 8 --port 8000
-```
-
----
-
-### 7. MCP Server
-
-**File:** `mcp_server.py`
-
-Exposes the FINRA knowledge base as a Model Context Protocol server. Any MCP-compatible client — Claude Desktop, Cursor, or a custom agent — can consume it without knowledge of the underlying data model or retrieval logic.
-
-**Tools:**
-
-| Tool | Description |
+| Tool | What it does |
 |---|---|
-| `retrieve_clauses` | Searches the knowledge base using semantic similarity and optional metadata filtering. Accepts structured intent fields to improve precision. |
-| `extract_intent` | Converts a plain-language situation description into structured intent fields matching the ChromaDB schema. Uses the Anthropic API. |
+| `search_clauses` | Semantic (dense) or keyword (sparse/BM25) search over the FINRA clause knowledge base, with optional metadata filters (`rule_id`, `obligated_actor`, `involves_customer`, `activity_type`). |
+| `get_clause_children` | Fetch the sub-clauses nested under a given clause, one level deep or all descendants. |
+| `get_clause_parent` | Fetch the clause(s) a given clause sits under, one level up or the full ancestor chain. |
+| `resolve_cross_references` | Resolve every citation inside a clause's text — both bare rule-number citations (e.g. "2111, Suitability") and fully qualified inline clause citations — into the actual clause/rule records they point to. |
+| `list_rules` | List every FINRA rule's metadata (id, name, category, source URL), optionally filtered by category. Useful for browsing when you don't yet know a specific rule or clause. |
+| `ask_finra_compliance_agent` | Run a full turn of the compliance reasoning agent on a described situation — the same pipeline as the chat interface (clarification questions, iterative clause retrieval + reasoning, synthesis, and optional human handoff). Multi-turn: pass the returned `thread_id` back in on follow-up calls to continue the same conversation. Note: unlike the other tools, this one is not read-only — a conversation that reaches human handoff and receives consent will send a real email to the compliance team. |
 
-**Resources:**
+**Resources** — exact-key lookups the client can read directly, without a search:
 
-| Resource | Description |
+| Resource | What it returns |
 |---|---|
-| `finra://rules/index` | Lists all rules in the knowledge base with clause counts |
-| `finra://rules/{rule_id}` | All clauses for a specific rule |
-| `finra://clauses/{clause_ref}` | Complete detail record for a single clause |
+| `finra-clause://{clause_ref}` | The full record for one clause — text, rule metadata, and structured fields. |
+| `finra-rule://{rule_id}` | An entire rule — metadata plus every clause under it. |
 
-**Prompts:**
-
-| Prompt | Description |
-|---|---|
-| `clarification_prompt` | The multi-turn clarification prompt template |
-| `compliance_reasoning_prompt` | The reasoning prompt template for analysing retrieved clauses |
-
-**Recommended agent flow:**
-1. Read `finra://rules/index` to understand available rules
-2. Use `clarification_prompt` to conduct a focused clarification conversation
-3. Call `extract_intent` with the situation summary
-4. Call `retrieve_clauses` with the situation and intent fields
-5. Use `compliance_reasoning_prompt` to reason over retrieved clauses
+Only the retrieval tools go through the vector database; `list_rules` and both resources read directly from the underlying data files, so they work even if Qdrant isn't running.
 
 ---
 
-## Project Structure
+## Conclusion
 
-```
-policy-and-compliance-reasoning/
-├── config/
-│   ├── __init__.py
-│   ├── settings.py          # all constants, paths, model configs
-│   └── prompts.py           # all prompt templates
-├── ingestion/
-│   ├── __init__.py
-│   ├── parse_finra.py       # scraper, clause parser, normaliser
-│   └── build_knowledge_base.py  # orchestration + ChromaDB ingestion
-├── pipeline/
-│   ├── __init__.py
-│   ├── intent_pipeline.py   # clarification agent + intent extraction
-│   ├── retrieval.py         # ChromaDB retrieval layer
-│   └── compliance_reasoning.py  # reasoning + follow-up
-├── web/
-│   ├── __init__.py
-│   ├── server.py            # FastAPI backend
-│   └── static/
-│       └── index.html       # chat UI
-├── mcp_server.py            # MCP server
-├── app.py                   # terminal chatbot (development use)
-├── data/
-│   ├── chromadb/            # persistent ChromaDB storage
-│   ├── normalized_documents.jsonl  # normalisation checkpoint
-│   └── parsed_rules.json    # scraping checkpoint
-└── models/
-    ├── qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf
-    └── Meta-Llama-3.1-8B-Instruct-Q8_0.gguf
-```
-
----
-
-## Setup and Installation
-
-**Prerequisites**
-- Python 3.11+
-- 16GB RAM minimum (for 8B quantized models)
-- macOS or Linux (llama_cpp GPU offload requires Metal on Mac or CUDA on Linux)
-
-**Install dependencies**
-```bash
-pip install requests beautifulsoup4 llama-cpp-python \
-            chromadb sentence-transformers \
-            fastapi uvicorn mcp anthropic
-```
-
-**Download models**
-
-Place GGUF model files in `models/`:
-- `qwen2.5-7b-instruct-q8_0-00001-of-00003.gguf`
-- `Meta-Llama-3.1-8B-Instruct-Q8_0.gguf`
-
-**Set environment variable (required for MCP server only)**
-```bash
-export ANTHROPIC_API_KEY=your_key_here
-```
-
----
-
-## Usage
-
-### Build the Knowledge Base
-
-Run once before using any other component. Supports `--skip-scraping` and `--skip-normalizing` flags to resume from checkpoints if interrupted.
-
-```bash
-# Full pipeline
-python -m ingestion.build_knowledge_base --model qwen
-
-# Resume normalisation after a crash
-python -m ingestion.build_knowledge_base --model qwen --skip-scraping
-
-# Re-ingest from existing JSONL checkpoint
-python -m ingestion.build_knowledge_base --skip-scraping --skip-normalizing
-```
-
-Expected output: `187 clauses` ingested into `data/chromadb/`.
-
-### Run the Web Chatbot
-
-```bash
-python -m web.server --model qwen
-```
-
-Open `http://127.0.0.1:8000` in your browser. The assistant will ask clarifying questions, retrieve the relevant FINRA clauses, and return a cited compliance analysis. Follow-up questions are supported within the same session.
-
-### Run the MCP Server
-
-```bash
-python mcp_server.py
-```
-
-The server communicates over stdio and is designed to be launched by an MCP client, not run interactively.
-
-### Connect to Claude Desktop
-
-Add the following to your Claude Desktop configuration file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "finra-compliance": {
-      "command": "python",
-      "args": ["/full/path/to/policy-and-compliance-reasoning/mcp_server.py"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop. A hammer icon in the chat input confirms the server is connected. You can then ask Claude Desktop FINRA compliance questions and it will call your local MCP server to retrieve the relevant rule clauses.
-
----
-
-## FINRA Rules Covered
-
-| Rule | Name | Category |
-|---|---|---|
-| 3110 | Supervision | supervision |
-| 3120 | Supervisory Control System | supervision |
-| 3130 | Annual Certification of Compliance and Supervisory Processes | supervision |
-| 3240 | Borrowing From or Lending to Customers | associated_person_conduct |
-| 3270 | Outside Business Activities of Registered Persons | associated_person_conduct |
-| 3280 | Private Securities Transactions of an Associated Person | associated_person_conduct |
-| 4511 | General Requirements for Books and Records | books_and_records |
-
----
-
-## Design Decisions
-
-**Why clause-level parsing rather than chunk-level splitting?**
-
-Standard RAG systems split documents into fixed-size chunks of 200-500 tokens. FINRA rules are structured as deeply nested legal obligations where meaning depends on hierarchy — `(c)(3)(C)` is an exception to `(c)(3)` which is a sub-requirement of `(c)` which is part of the main obligation in `(a)`. Fixed-size chunking destroys this structure. Clause-level parsing preserves it, and fragment merging ensures every stored unit is self-contained.
-
-**Why structured metadata filtering alongside semantic search?**
-
-Semantic search alone retrieves clauses that are topically similar but may be from the wrong rule category or govern the wrong actor. A question about what a registered representative must do should not retrieve clauses that govern what the member firm must do, even if they are semantically similar. Metadata filtering enforces these distinctions that embedding similarity cannot.
-
-**Why a multi-turn clarification conversation rather than direct retrieval?**
-
-A user asking "do we need to inspect every year?" provides no information about whether they are asking about a branch office, an OSJ, or a non-branch location — three different inspection regimes with different frequency requirements. Clarification surfaces the specifics that determine which clauses are relevant. Without it, retrieval either returns too many clauses or the wrong ones.
-
-**Why local quantized models rather than API calls for the chatbot?**
-
-The clarification conversation involves multiple LLM calls per session — one per clarification turn plus intent extraction plus reasoning. Using API calls for all of these would introduce per-session latency and cost that makes interactive use impractical. Local quantized models run inference in 1-3 seconds per call on consumer hardware.
-
-**Why the MCP server uses the Anthropic API for `extract_intent`?**
-
-The local model is not a dependency that can be shipped with the server. The MCP server is intended to be portable — any developer who clones the repository and builds the knowledge base should be able to run it. The knowledge base and retrieval layer have no local model dependency (ChromaDB and sentence-transformers are lightweight). Only the `extract_intent` tool requires an LLM call, and the Anthropic API provides that without requiring the consumer to download multi-gigabyte model files.
-
----
-
-## Limitations
-
-- **Knowledge base coverage** — only 7 FINRA rules are currently ingested. Questions about rules outside this set will return no relevant results or misleading results from the closest available clauses.
-- **Normalisation quality** — LLM-extracted metadata fields are imperfect. A wrongly classified `activity_type` will cause the metadata filter to exclude correct clauses. The fallback to unfiltered semantic search partially mitigates this.
-- **Local model capability** — 7-8B quantized models follow complex multi-constraint instructions less reliably than frontier models. The clarification prompt and reasoning prompt were both extensively tuned to compensate, but edge cases remain.
-- **No real-time rule updates** — the knowledge base is built from a static scrape. FINRA rule amendments are not automatically reflected. The ingestion pipeline must be re-run to incorporate updates.
-- **Context window limits** — follow-up conversations are bounded by the model's context window. Long clarification conversations or very long retrieved clause texts reduce the available context for follow-up reasoning.
-- **Not legal advice** — this system is a decision-support tool. It states what rules require based on retrieved clauses. It is not a substitute for qualified legal counsel.
+This project was built end-to-end — from scraping and deterministically parsing raw FINRA rule HTML, through LLM-based clause normalization and hybrid dense/sparse retrieval, to a stateful LangGraph reasoning agent, a custom-built automated evaluation harness with simulated users, and an MCP server for third-party integration. It's meant as a working example of applied LLM/AI engineering on a real, high-stakes domain: retrieval, agentic reasoning, evaluation, and deployment, all in one system.
