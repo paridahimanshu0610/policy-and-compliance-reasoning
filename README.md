@@ -106,6 +106,43 @@ This difficulty ladder is the point: it evaluates not just whether the agent *kn
 
 Every run produces a per-question JSONL log and a rolled-up JSON summary (per-situation and overall), so results can be audited at both the individual-question and aggregate level.
 
+### Evaluation Results
+
+Run on **130 medium-difficulty questions** across the **6 situation types most representative of real-world queries**: Multiple Clauses (Same Role & Distinct Roles), Conditional Trigger, Conflicting Clauses, Cross-Rule Dependency, and Entity-Specific Clause.
+
+| Category | Metric | Value | What it means |
+|---|---|---|---|
+| Retrieval | Must-clause gate pass rate | 71.5% | % of questions where the agent found **every** required clause — strict, all-or-nothing. |
+| | Avg. must-clause recall | 0.847 | On average, what *fraction* of required clauses were found per question (partial credit allowed, unlike gate pass). |
+| Reasoning | Full coverage rate | 94.7% | For clauses the agent found, how often its explanation fully matched expert reasoning for why that clause applies. |
+| Hallucination | Clause-citation grounding pass rate | 96.9% | % of answers where every clause cited was real and actually looked up — no invented rule numbers. |
+| Quality | Responsiveness / Structural clarity | 4.84 / 4.97 (out of 5) | How well the answer addressed the question, and how clearly it was written — both judged independently, 1–5 scale. |
+| Agentic | Avg. tool calls / clarification turns | 5.3 / 0.7 | On average, how many times the agent searched the clause database, and how many follow-up questions it asked the user, per question. |
+| Cost | Avg. tokens / time per question | ~96K tokens, ~343s | On average, how much text the agent processed (a proxy for API cost) and how long, in real elapsed time, one question took to answer. |
+
+**Agent vs. retrieval-only baseline.** The baseline strips away the agent entirely — no clarification, no reasoning, just a raw search against the clause database — scored under four combinations:
+
+- **Dense search** (semantic/embedding-based — matches by *meaning*) vs. **sparse search** (BM25-based — matches by shared *words*)
+- **Raw query** (the casual, often-incomplete question a real user would type) vs. **expert-written summary** (a clean, fully-complete restatement of the situation, representing a best-case query)
+
+| | Must-clause gate pass | Avg. must-clause recall |
+|---|---|---|
+| **Agent** | **71.5%** | **0.847** |
+| Baseline — dense, raw query | 54.6% | 0.758 |
+| Baseline — dense, expert summary (ceiling) | 71.5% | 0.859 |
+| Baseline — sparse, raw query | 17.7% | 0.362 |
+
+The agent, working only from the same raw underspecified query as the baseline, **matches the retrieval ceiling** (dense search + expert summary — the best a perfect, fully-specified query could get with no agent at all) on gate pass and comes within ~0.01 on recall, and comfortably beats both raw-query dense search and sparse (keyword) search — evidence that its clarification and multi-hop reasoning loop is doing real work, not just adding overhead.
+
+**Per-situation, it exceeds the ceiling on Conflicting Clauses (+10 pts) and Entity-Specific Clause (+5 pts)**, matches it on Multiple Clauses/Same Role, and trails it on Conditional Trigger (−10 pts) and Cross-Rule Dependency, which is the clear weak point (40% gate pass, lowest must-mention coverage, longest reasoning time).
+
+**Key takeaways:**
+- The agentic loop (clarification + multi-hop retrieval) closes most of the gap to the theoretical retrieval ceiling (dense search + expert summary), and outright beats it in situations where the missing detail is user-specific rather than generic. It also clearly outperforms both dense search on a raw query and keyword (sparse) search alone.
+- **Cross-Rule Dependency is the priority fix** — weakest on retrieval, coverage, and latency simultaneously.
+- Hallucination is low (~4–6% fabrication/noise rates) but non-zero — worth continued monitoring given the compliance use case.
+- Answer quality stays high (4.8–5.0/5) even in weaker situations, meaning failures tend to be silent omissions rather than visibly broken answers.
+- Entity-Specific situations are notably more expensive (token usage, tool calls) despite strong accuracy — a cost trade-off worth tracking.
+
 ---
 
 ## MCP Server
@@ -138,4 +175,4 @@ Only the retrieval tools go through the vector database; `list_rules` and both r
 
 ## Conclusion
 
-This project was built end-to-end — from scraping and deterministically parsing raw FINRA rule HTML, through LLM-based clause normalization and hybrid dense/sparse retrieval, to a stateful LangGraph reasoning agent, a custom-built automated evaluation harness with simulated users, and an MCP server for third-party integration. It's meant as a working example of applied LLM/AI engineering on a real, high-stakes domain: retrieval, agentic reasoning, evaluation, and deployment, all in one system.
+This project was built end-to-end — from scraping and deterministically parsing raw FINRA rule HTML, through LLM-based clause normalization and hybrid dense/sparse retrieval, to a stateful LangGraph reasoning agent, a custom-built automated evaluation harness with simulated users, and an MCP server for third-party integration. It's meant as a working example of applied LLM/AI engineering on a real, high-stakes domain: retrieval, agentic reasoning, evaluation, and deployment, all in one system. Early evaluation on the situations most representative of real-world queries backs this up in practice — the agent closes most of the gap to a theoretical retrieval ceiling (and beats it outright in situations requiring user-specific clarification), while keeping hallucination low and answer quality consistently high, with cross-rule reasoning identified as the clearest area for continued work.
