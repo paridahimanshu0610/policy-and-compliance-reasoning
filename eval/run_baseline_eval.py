@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config.settings import ACTIVE_EMBEDDING_MODEL, EVAL_OUTPUT_DIR, RETRIEVAL_TOP_K
+from config.prompts import EVAL_SITUATIONWISE_PROMPT
 from ingestion.build_vector_db import generate_query_embeddings, search_clauses
 
 from eval import metrics as det
@@ -143,6 +144,10 @@ def summarize_combo(records: list[dict], combo: str) -> dict:
         "avg_overall_recall": _safe_mean([r[combo]["overall_recall"]["recall"] for r in records]),
     }
 
+def _get_situation_meta(situation_folder: str):
+    situation_dict = EVAL_SITUATIONWISE_PROMPT[situation_folder[:9].upper() + " " + situation_folder[9:]]
+    return {"situation_title": situation_dict.get("SITUATION_TITLE", ""), 
+            "situation_definition": situation_dict.get("SITUATION_DEFINITION", "")}
 
 def build_baseline_report(records: list[dict], top_k: int, embedding_model: str) -> dict:
     by_situation_folder: dict[str, list[dict]] = defaultdict(list)
@@ -152,7 +157,7 @@ def build_baseline_report(records: list[dict], top_k: int, embedding_model: str)
     return {
         "overall": {combo: summarize_combo(records, combo) for combo in COMBOS},
         "by_situation_folder": {
-            folder: {combo: summarize_combo(items, combo) for combo in COMBOS}
+            folder: {**_get_situation_meta(folder), **{combo: summarize_combo(items, combo) for combo in COMBOS}}
             for folder, items in sorted(by_situation_folder.items())
         },
         "config": {

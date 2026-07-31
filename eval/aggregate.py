@@ -11,7 +11,7 @@ re-run/tweaked against an existing results JSONL without re-running the
 from collections import defaultdict
 from statistics import mean, median, stdev
 from typing import Any, Optional
-
+from config.prompts import EVAL_SITUATIONWISE_PROMPT
 
 def _safe_mean(values: list[Optional[float]]) -> Optional[float]:
     clean = [v for v in values if v is not None]
@@ -45,11 +45,15 @@ def _time_stats(records: list[dict]) -> dict:
     }
 
 
-def summarize(records: list[dict]) -> dict:
+def summarize(records: list[dict], situation_folder: str = None) -> dict:
     """One summary dict for a homogeneous group of records (either all
     records for one situation folder, or all records overall)."""
     n = len(records)
     answered = [r for r in records if r["terminated_via"] == "answer"]
+    if situation_folder:
+        situation_dict = EVAL_SITUATIONWISE_PROMPT[situation_folder[:9].upper() + " " + situation_folder[9:]]
+        situation_meta = {"situation_title": situation_dict.get("SITUATION_TITLE", ""), 
+            "situation_definition": situation_dict.get("SITUATION_DEFINITION", "")}
 
     coverage_full_flags = []
     groundedness_bad_flags = []  # True if "fabricated" (the failure case we care about)
@@ -69,7 +73,7 @@ def summarize(records: list[dict]) -> dict:
         for m in (r.get("reasoning") or {}).get("must_mention", []):
             must_mention_flags.append(m["covered"])
 
-    return {
+    result = {
         "n_questions": n,
         "terminated_via_breakdown": {
             kind: sum(1 for r in records if r["terminated_via"] == kind)
@@ -124,6 +128,11 @@ def summarize(records: list[dict]) -> dict:
         "total_false_explain_triggers": sum(r["agentic"]["false_explain_triggers"] for r in records),
     }
 
+    if situation_folder:
+        result = {**situation_meta, **result}
+
+    return result
+
 
 def build_report(records: list[dict]) -> dict:
     by_situation_folder: dict[str, list[dict]] = defaultdict(list)
@@ -133,6 +142,6 @@ def build_report(records: list[dict]) -> dict:
     return {
         "overall": summarize(records),
         "by_situation_folder": {
-            folder: summarize(items) for folder, items in sorted(by_situation_folder.items())
+            folder: summarize(items, folder) for folder, items in sorted(by_situation_folder.items())
         },
     }
