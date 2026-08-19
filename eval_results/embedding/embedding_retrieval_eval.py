@@ -1,5 +1,7 @@
 # --------------------------------------------------------------------------
 # Embedding Evaluation
+# For explanation, see (pp29): https://claude.ai/chat/728f23b1-124b-440c-9856-9fdeab9d7a76
+# Refer to: "In the aggregate_metrics function, I am taking the aggregate result for each metric."
 # --------------------------------------------------------------------------
 import time
 import json
